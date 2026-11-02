@@ -60,7 +60,7 @@ export function validateName(input, { max = 10 } = {}) {
   const value = String(input ?? '').replace(/\s+/g, ' ').trim();
   if (!value) return { ok: false, error: '이름을 적어주세요.' };
   if (value.length > max) return { ok: false, error: `이름은 ${max}자까지 적을 수 있어요.` };
-  if (!/^[가-힣A-Za-z ]+$/.test(value)) return { ok: false, error: '이름은 한글이나 영어로만 적어주세요. 숫자, 기호, 자음만 쓴 글자는 쓸 수 없어요.' };
+  if (!/^[\uAC00-\uD7A3A-Za-z ]+$/.test(value)) return { ok: false, error: '이름은 한글이나 영어로만 적어주세요. 숫자, 기호, 자음만 쓴 글자는 쓸 수 없어요.' };
   const flat = value.replace(/ /g, '').toLowerCase();
   const squeezed = flat.replace(/(.)\1+/g, '$1'); // fuuuck → fuck, 씨이이발 같은 반복 변형 대비
   if (BAD_WORDS.some((w) => flat.includes(w.toLowerCase()) || squeezed.includes(w.toLowerCase()))) return { ok: false, error: '다른 이름으로 적어주세요.' };

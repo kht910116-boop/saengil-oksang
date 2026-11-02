@@ -50,11 +50,13 @@ function startAmbient() {
 }
 
 // BGM: 상황마다 다른 곡을 부드럽게 바꿔 튼다. 파일이 없으면 조용히 넘어간다.
+// 미리보기 페이지처럼 다른 경로에 올릴 때는 window.__AUDIO_BASE 로 곡 위치를 바꾼다
+const AUDIO_BASE = (typeof window !== 'undefined' && window.__AUDIO_BASE) || '/audio/';
 const TRACKS = {
-  rooftop: { src: '/audio/bgm-rooftop.mp3', loop: true, volume: 0.42 },
-  door: { src: '/audio/bgm-door.mp3', loop: true, volume: 0.38 },
-  midnight: { src: '/audio/bgm-midnight.mp3', loop: false, volume: 0.6 },
-  landing: { src: '/audio/bgm-rooftop.mp3', loop: true, volume: 0.32 },
+  rooftop: { src: `${AUDIO_BASE}bgm-rooftop.mp3`, loop: true, volume: 0.42 },
+  door: { src: `${AUDIO_BASE}bgm-door.mp3`, loop: true, volume: 0.38 },
+  midnight: { src: `${AUDIO_BASE}bgm-midnight.mp3`, loop: false, volume: 0.6 },
+  landing: { src: `${AUDIO_BASE}bgm-rooftop.mp3`, loop: true, volume: 0.32 },
 };
 const players = {};
 let wanted = null; // 지금 틀어야 하는 곡 이름
