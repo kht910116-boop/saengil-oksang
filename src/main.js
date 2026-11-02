@@ -7,6 +7,8 @@ import { buildWorld, ROOF } from './world.js';
 import { createAvatar } from './avatar.js';
 import { sound } from './audio.js';
 import { api, connectRoom } from './net.js';
+import { createRecorder, saveVideo, calendarFile } from './recorder.js';
+import { LANTERN_TEMPLATES, renderTemplate } from './config.js';
 import './style.css';
 
 // ── 경로: / 옥상 만들기 · /r/demo 샘플 · /r/:id 실제 옥상 ──
@@ -14,7 +16,8 @@ const path = location.pathname;
 const roomMatch = path.match(/^\/r\/([\w-]{4,16})\/?$/);
 const MODE = path === '/' || path === '/index.html' ? 'landing' : roomMatch?.[1] === 'demo' ? 'demo' : roomMatch ? 'room' : 'landing';
 const ROOM_ID = MODE === 'room' ? roomMatch[1] : null;
-const OWNER_KEY = new URLSearchParams(location.search).get('k');
+const QS = new URLSearchParams(location.search);
+const OWNER_KEY = QS.get('k');
 document.body.dataset.mode = MODE;
 
 const KST = 9 * 3600_000;
@@ -27,16 +30,16 @@ const LANTERN_COLORS = [
 ];
 const HAT_COLORS = [0xffc46b, 0xf29bb3, 0xb9a6f2, 0x8fd3c1];
 const DEMO_FRIENDS = [
-  { name: '수아', color: 0x8fd3c1, msg: '올해도 제일 먼저 축하할게!' },
-  { name: '도윤', color: 0xb9a6f2, msg: '민지야 생일 축하해. 밥 한번 사라 ㅋㅋ' },
-  { name: '하은', color: 0xffc46b, msg: '우리 10년째 친구인 거 알지? 사랑해' },
-  { name: '엄마', color: 0xf29bb3, msg: '우리 딸, 태어나줘서 고마워' },
-  { name: '지호', color: 0x8fd3c1, msg: '새로운 일 꼭 잘될 거야. 응원해' },
-  { name: '서진', color: 0xfbf4e8, msg: '생일 축하! 다음 주에 케이크 먹으러 가자' },
+  { name: '수아', color: 0x8fd3c1, msg: '민지야, 생일 축하해!' },
+  { name: '도윤', color: 0xb9a6f2, msg: '맛있는 거 먹으러 가자!' },
+  { name: '하은', color: 0xffc46b, msg: '우리 오래오래 보자' },
+  { name: '엄마', color: 0xf29bb3, msg: '태어나줘서 고마워' },
+  { name: '지호', color: 0x8fd3c1, msg: '꿈꾸는 일 모두 이루어지길' },
+  { name: '서진', color: 0xfbf4e8, msg: '다음 생일에도 같이 불 켜자' },
 ];
 
 // 옥상 상태
-const ROOF_STATE = { owner: '민지', igniteAt: Date.now() + 3 * 86400_000, isOwner: false };
+const ROOF_STATE = { owner: '민지', igniteAt: Date.now() + 3 * 86400_000, isOwner: false, role: 'friend', hidden: [] };
 let serverOffset = 0;
 const serverNow = () => Date.now() + serverOffset;
 
@@ -44,6 +47,18 @@ const store = {
   get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* 저장 불가 환경 */ } },
 };
+
+// 옥상을 만든 사람의 관리 키: 링크(?h=)로 오거나, 만든 기기에 저장돼 있다
+let HOST_KEY = QS.get('h') || (ROOM_ID ? store.get(`host:${ROOM_ID}`) : null);
+if (QS.get('h') && ROOM_ID) store.set(`host:${ROOM_ID}`, QS.get('h'));
+function authQuery() {
+  const p = new URLSearchParams();
+  if (OWNER_KEY) p.set('k', OWNER_KEY);
+  if (HOST_KEY) p.set('h', HOST_KEY);
+  const str = p.toString();
+  return str ? `?${str}` : '';
+}
+const authBody = () => ({ k: OWNER_KEY || undefined, h: HOST_KEY || undefined });
 
 // ── 렌더러 ──
 const canvas = document.querySelector('#scene');
@@ -70,7 +85,7 @@ composer.addPass(bloomPass);
 // 느린 기기에서는 해상도를 낮추고 빛 번짐을 끈다
 const perf = { sum: 0, n: 0, level: 0 };
 function adaptQuality(dt) {
-  if (perf.level >= 2) return;
+  if (perf.level >= 2 || ignite) return; // 점등(녹화) 중에는 해상도를 바꾸지 않는다
   perf.sum += dt;
   perf.n += 1;
   if (perf.n < 90) return;
@@ -126,7 +141,11 @@ let me = null;
 // ── 등불 ──
 const lanterns = [];
 const lanternIds = new Set();
-const slots = world.lanternSlots.slice().sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
+// 1순위 자리를 테이블에서 가까운 순으로 채운 뒤 2순위 자리를 채운다
+const slots = world.lanternSlots
+  .slice()
+  .sort((a, b) => a.tier - b.tier || Math.hypot(a.pos.x, a.pos.z) - Math.hypot(b.pos.x, b.pos.z))
+  .map((s) => s.pos);
 
 function lanternMesh(hex) {
   const g = new THREE.Group();
@@ -148,6 +167,15 @@ function lanternMesh(hex) {
   return g;
 }
 
+function removeLantern(id) {
+  const i = lanterns.findIndex((l) => l.id === id);
+  if (i < 0) return;
+  const [l] = lanterns.splice(i, 1);
+  scene.remove(l.mesh);
+  lanternIds.delete(id);
+  if (bubbleFor === l) hideBubble();
+}
+
 function hangLantern({ id = null, name, msg, color, slot = lanterns.length }, { from = null } = {}) {
   if (id != null) {
     if (lanternIds.has(id)) return null;
@@ -158,7 +186,7 @@ function hangLantern({ id = null, name, msg, color, slot = lanterns.length }, { 
   m.position.copy(from || at);
   if (litLevel > 1) m.userData.paperMat.emissiveIntensity = 1.6;
   scene.add(m);
-  const l = { mesh: m, slot: at.clone(), name, msg, phase: Math.random() * 6, fly: from ? 0 : 1, from: from ? from.clone() : null };
+  const l = { id, mesh: m, slot: at.clone(), name, msg, phase: Math.random() * 6, fly: from ? 0 : 1, from: from ? from.clone() : null };
   m.userData.lantern = l;
   lanterns.push(l);
   return l;
@@ -428,6 +456,8 @@ function startIgnite() {
   ignite = { t: 0, clicked: new Set() };
   ignitedThisSession = true;
   document.body.classList.add('is-igniting');
+  sound.music('midnight', 'rooftop');
+  recorder.start();
   setStatus('자정이에요. 다 같이 불을 켜요');
 }
 
@@ -458,6 +488,7 @@ function updateIgnite(dt) {
   skyName.material.opacity = THREE.MathUtils.lerp(skyName.material.opacity, t > 4.8 ? 1 : 0, dt * 1.5);
   if (t > 4.8) skyName.position.y = 10.5 + Math.sin(t * 0.8) * 0.15;
   if (t > 14) {
+    recorder.stop();
     ignite = null;
     litLevel = 3.2;
     document.body.classList.remove('is-igniting');
@@ -532,11 +563,34 @@ soundBtn.addEventListener('click', async () => {
 
 const bubble = document.querySelector('#bubble');
 let bubbleFor = null;
+const canHide = () => ROOF_STATE.role === 'host' || (ROOF_STATE.role === 'owner' && serverNow() >= ROOF_STATE.igniteAt - 15_000);
 function showLantern(l) {
   bubbleFor = l;
   bubble.innerHTML = '<p class="bubble-msg"></p><p class="bubble-from"></p>';
   bubble.querySelector('.bubble-msg').textContent = l.msg;
   bubble.querySelector('.bubble-from').textContent = `${l.name}의 등불`;
+  if (MODE === 'room' && l.id != null) {
+    const act = document.createElement('button');
+    act.className = 'bubble-act';
+    act.textContent = canHide() ? '이 등불 숨기기' : '신고';
+    act.addEventListener('click', async () => {
+      act.disabled = true;
+      try {
+        if (canHide()) {
+          await api(`/api/rooftops/${ROOM_ID}/lanterns/${l.id}/hide`, { method: 'POST', body: authBody() });
+          removeLantern(l.id);
+          if (ROOF_STATE.role === 'host' && !ROOF_STATE.hidden.some((h) => h.id === l.id)) ROOF_STATE.hidden.push({ id: l.id, name: l.name, msg: l.msg });
+          setStatus('등불을 숨겼어요.');
+        } else {
+          const r = await api(`/api/rooftops/${ROOM_ID}/lanterns/${l.id}/report`, { method: 'POST', body: {} });
+          act.textContent = r.already ? '이미 신고했어요' : '신고했어요';
+        }
+      } catch (err) {
+        act.textContent = err.message;
+      }
+    });
+    bubble.appendChild(act);
+  }
   bubble.hidden = false;
   sound.chime();
 }
@@ -547,7 +601,8 @@ document.querySelector('#btn-support').addEventListener('click', () => {
     <h2>전구 보태기</h2>
     <p class="sheet-lead">생일 옥상은 누구나 무료로 열 수 있어요. 전구값을 조금 보태주시면 다음 옥상을 켜는 데 써요.</p>
     <div class="qr-slot" role="img" aria-label="카카오페이 송금 QR이 들어갈 자리">카카오페이 송금 QR<br><small>이미지를 넣을 자리예요</small></div>
-    <button class="btn wide" data-close>닫기</button>`);
+    <button class="btn wide" data-close>닫기</button>
+    <p class="legal-links"><a href="/privacy" target="_blank" rel="noopener">개인정보처리방침</a> · <a href="/terms" target="_blank" rel="noopener">이용약관</a></p>`);
 });
 
 // 날짜 표시(한국 시간)
@@ -567,12 +622,15 @@ function countdownText() {
 
 // ── 등불 달기(공통 시트) ──
 function openLanternSheet(onSubmit, defaultName) {
+  const tpls = LANTERN_TEMPLATES.map((_, i) => renderTemplate(i, ROOF_STATE.owner));
   openSheet(`
     <h2>등불 달기</h2>
-    <p class="sheet-lead">${esc(ROOF_STATE.owner)}에게 남길 한 줄을 적어주세요. 등불은 자정에 다 같이 켜져요.</p>
+    <p class="sheet-lead">${esc(ROOF_STATE.owner)}에게 전할 말을 골라주세요. 등불은 자정에 다 같이 켜져요.</p>
     <form id="lantern-form">
       <label class="field"><span>내 이름</span><input id="lantern-name" name="name" maxlength="10" required placeholder="예: 수아" value="${esc(defaultName || '')}"></label>
-      <label class="field"><span>남길 말</span><textarea id="lantern-msg" name="msg" maxlength="40" rows="2" required placeholder="생일 축하해!"></textarea><small class="char-count">0 / 40</small></label>
+      <fieldset class="templates"><legend>전할 말</legend>
+        ${tpls.map((t, i) => `<label class="tpl"><input type="radio" name="tpl" value="${i}" ${i === 0 ? 'checked' : ''}><span>${esc(t)}</span></label>`).join('')}
+      </fieldset>
       <fieldset class="swatches"><legend>등불 색</legend>
         ${LANTERN_COLORS.map((c, i) => `<label class="swatch"><input type="radio" name="color" value="${c.hex}" ${i === 0 ? 'checked' : ''}><span style="--c:${hex6(c.hex)}" aria-label="${c.name}"></span></label>`).join('')}
       </fieldset>
@@ -580,10 +638,7 @@ function openLanternSheet(onSubmit, defaultName) {
       <button class="btn primary wide" type="submit">이 등불 달기</button>
     </form>`);
   const form = document.querySelector('#lantern-form');
-  const ta = form.querySelector('textarea');
-  const cnt = form.querySelector('.char-count');
-  ta.addEventListener('input', () => { cnt.textContent = `${ta.value.length} / 40`; });
-  ta.focus();
+  form.addEventListener('input', () => { form.querySelector('.form-error').textContent = ''; });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
@@ -591,7 +646,8 @@ function openLanternSheet(onSubmit, defaultName) {
     btn.disabled = true;
     btn.textContent = '등불 다는 중…';
     try {
-      await onSubmit({ name: fd.get('name').trim(), msg: fd.get('msg').trim(), color: Number(fd.get('color')) });
+      const tpl = Number(fd.get('tpl'));
+      await onSubmit({ name: fd.get('name').trim(), tpl, msg: tpls[tpl], color: Number(fd.get('color')) });
       closeSheet();
     } catch (err) {
       form.querySelector('.form-error').textContent = err.message;
@@ -607,8 +663,125 @@ function afterHang() {
   setStatus(`등불을 달았어요. 지금 ${lanterns.length}개의 등불이 ${ROOF_STATE.owner}를 기다려요`);
 }
 
+// ── 점등 영상 ──
+const recorder = createRecorder(canvas, () => (sound.enabled ? sound.stream() : null), () => showVideoButton());
+function showVideoButton() {
+  let btn = document.querySelector('#btn-video');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.id = 'btn-video';
+    btn.className = 'btn';
+    btn.textContent = '점등 영상 저장';
+    document.querySelector('.actions').prepend(btn);
+    btn.addEventListener('click', async () => {
+      if (!recorder.blob) return;
+      const r = await saveVideo(recorder.blob, `saengil-oksang.${recorder.ext}`);
+      if (r === 'downloaded') setStatus('점등 영상을 저장했어요. 스토리에 올려보세요');
+    });
+  }
+  setStatus('점등 영상이 준비됐어요. 저장해서 스토리에 올려보세요', 6000);
+}
+
+// ── 자정 알림(캘린더) ──
+function addCalendarButton() {
+  if (document.querySelector('#btn-calendar')) return;
+  const btn = document.createElement('button');
+  btn.id = 'btn-calendar';
+  btn.className = 'btn';
+  btn.textContent = '자정 알림 받기';
+  document.querySelector('.actions').insertBefore(btn, igniteBtn);
+  btn.addEventListener('click', () => {
+    const blob = calendarFile({ title: `${ROOF_STATE.owner}의 생일 옥상 점등`, url: `${location.origin}/r/${ROOM_ID}`, at: ROOF_STATE.igniteAt });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'saengil-oksang-midnight.ics';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+    setStatus('캘린더에 추가하면 자정 10분 전에 알려드려요');
+  });
+}
+
+// ── 등불 다시 불러오기(숨김 해제 등) ──
+async function refreshLanterns() {
+  try {
+    const d = await api(`/api/rooftops/${ROOM_ID}${authQuery()}`);
+    if (d.role === 'host') ROOF_STATE.hidden = d.lanterns.filter((l) => l.hidden);
+    for (const l of d.lanterns) if (!l.hidden) hangLantern(l);
+  } catch { /* 다음 이벤트 때 다시 */ }
+}
+
+// ── 만든 사람의 관리 화면 ──
+function addManageButton() {
+  if (document.querySelector('#btn-manage')) return;
+  const btn = document.createElement('button');
+  btn.id = 'btn-manage';
+  btn.className = 'icon-btn';
+  btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg><span>관리</span>';
+  document.querySelector('.top-right').appendChild(btn);
+  btn.addEventListener('click', openManage);
+}
+
+function openManage() {
+  const base = `${location.origin}/r/${ROOM_ID}`;
+  const links = [
+    ['manage-friend', '친구 링크', base],
+    ['manage-owner', `${ROOF_STATE.owner}에게 보낼 링크`, `${base}?k=${ROOF_STATE.keys.ownerKey}`],
+    ['manage-host', '내 관리 링크', `${base}?h=${ROOF_STATE.keys.hostKey}`],
+  ];
+  const hidden = ROOF_STATE.hidden;
+  openSheet(`
+    <h2>옥상 관리</h2>
+    <p class="sheet-lead">이 화면은 옥상을 만든 사람에게만 보여요.</p>
+    ${links.map(([id, label, url]) => `
+      <div class="link-card"><p class="link-title">${esc(label)}</p>
+        <input id="${id}" readonly value="${esc(url)}"><button class="btn" data-copy="${id}">복사</button></div>`).join('')}
+    <p class="copy-status" role="status"></p>
+    <h3 class="sheet-sub">숨긴 등불 ${hidden.length}개</h3>
+    ${hidden.length ? `<ul class="hidden-list">${hidden.map((l) => `<li><span><b>${esc(l.name)}</b> ${esc(l.msg)}</span><button class="btn" data-show="${l.id}">다시 보이기</button></li>`).join('')}</ul>` : '<p class="sheet-lead">숨긴 등불이 없어요. 등불을 누르면 숨길 수 있어요.</p>'}
+    <h3 class="sheet-sub">옥상 지우기</h3>
+    <p class="sheet-lead">등불이 모두 지워지고 되돌릴 수 없어요.</p>
+    <button class="btn wide danger" id="delete-roof">이 옥상 지우기</button>
+    <p class="form-error" role="alert"></p>`);
+  sheetBody.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => {
+    const input = document.getElementById(b.dataset.copy);
+    input.select();
+    copyText(input.value, sheetBody.querySelector('.copy-status'));
+  }));
+  sheetBody.querySelectorAll('[data-show]').forEach((b) => b.addEventListener('click', async () => {
+    b.disabled = true;
+    try {
+      await api(`/api/rooftops/${ROOM_ID}/lanterns/${b.dataset.show}/show`, { method: 'POST', body: authBody() });
+      ROOF_STATE.hidden = ROOF_STATE.hidden.filter((l) => String(l.id) !== b.dataset.show);
+      b.closest('li').remove();
+      refreshLanterns();
+    } catch (err) {
+      b.textContent = err.message;
+    }
+  }));
+  const del = sheetBody.querySelector('#delete-roof');
+  let armed = false;
+  del.addEventListener('click', async () => {
+    if (!armed) {
+      armed = true;
+      del.textContent = '정말 지울게요 (한 번 더 누르기)';
+      return;
+    }
+    del.disabled = true;
+    try {
+      await api(`/api/rooftops/${ROOM_ID}`, { method: 'DELETE', body: authBody() });
+      store.set(`host:${ROOM_ID}`, null);
+      openSheet('<h2>옥상을 지웠어요</h2><p class="sheet-lead">등불이 모두 지워졌어요.</p><a class="btn primary wide" href="/">새 옥상 만들기</a>', { locked: true });
+    } catch (err) {
+      sheetBody.querySelector('.form-error').textContent = err.message;
+      del.disabled = false;
+    }
+  });
+}
+
 // ── 모드별 시작 ──
 async function startLanding() {
+  sound.music('landing');
   setSkyName('민지');
   document.querySelector('#owner').textContent = '생일 옥상';
   document.querySelector('#date').textContent = '친구 생일 자정에 다 같이 불을 켜요';
@@ -633,6 +806,7 @@ async function startLanding() {
       <p class="form-error" role="alert"></p>
       <button class="btn primary wide" type="submit">옥상 열기</button>
       <a class="text-link" href="/r/demo">샘플 옥상 먼저 둘러보기</a>
+      <p class="legal-links"><a href="/privacy" target="_blank" rel="noopener">개인정보처리방침</a> · <a href="/terms" target="_blank" rel="noopener">이용약관</a></p>
     </form>`, { locked: true });
   const form = document.querySelector('#create-form');
   form.month.value = String(today.m);
@@ -647,7 +821,7 @@ async function startLanding() {
         method: 'POST',
         body: { owner: form.owner.value, month: Number(form.month.value), day: Number(form.day.value), testSeconds: form.test.checked ? 60 : 0 },
       });
-      store.set(`owner:${r.id}`, r.ownerKey);
+      store.set(`host:${r.id}`, r.hostKey);
       showCreated(r);
     } catch (err) {
       form.querySelector('.form-error').textContent = err.message;
@@ -660,6 +834,7 @@ async function startLanding() {
 function showCreated(r) {
   const friendUrl = `${location.origin}/r/${r.id}`;
   const ownerUrl = `${friendUrl}?k=${r.ownerKey}`;
+  const hostUrl = `${friendUrl}?h=${r.hostKey}`;
   const { m, d } = kstParts(r.igniteAt);
   const isTest = r.igniteAt - r.now < 3600_000;
   openSheet(`
@@ -677,6 +852,12 @@ function showCreated(r) {
       <input id="link-owner" readonly value="${esc(ownerUrl)}">
       <button class="btn" data-copy="link-owner">주인공 링크 복사</button>
     </div>
+    <div class="link-card">
+      <p class="link-title">나만 갖고 있을 관리 링크</p>
+      <p class="link-desc">링크를 다시 보거나, 등불을 숨기거나, 옥상을 지울 때 써요. 다른 사람에게 보내지 마세요.</p>
+      <input id="link-host" readonly value="${esc(hostUrl)}">
+      <button class="btn" data-copy="link-host">관리 링크 복사</button>
+    </div>
     <p class="copy-status" role="status"></p>
     <a class="btn primary wide" href="/r/${esc(r.id)}">옥상으로 가서 첫 등불 달기</a>`, { locked: true });
   sheetBody.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => {
@@ -687,6 +868,7 @@ function showCreated(r) {
 }
 
 function startDemo() {
+  sound.music('rooftop');
   ROOF_STATE.owner = '민지';
   setSkyName('민지');
   document.querySelector('#owner').textContent = '민지의 생일 옥상';
@@ -713,13 +895,20 @@ let myId = null;
 async function startRoom() {
   let data;
   try {
-    data = await api(`/api/rooftops/${ROOM_ID}${OWNER_KEY ? `?k=${encodeURIComponent(OWNER_KEY)}` : ''}`);
+    data = await api(`/api/rooftops/${ROOM_ID}${authQuery()}`);
   } catch (err) {
     openSheet(`<h2>옥상을 열지 못했어요</h2><p class="sheet-lead">${esc(err.message)}</p><a class="btn primary wide" href="/">새 옥상 만들기</a>`, { locked: true });
     return;
   }
   serverOffset = data.now - Date.now();
-  Object.assign(ROOF_STATE, { owner: data.owner, igniteAt: data.igniteAt, isOwner: !!data.isOwner });
+  Object.assign(ROOF_STATE, { owner: data.owner, igniteAt: data.igniteAt, isOwner: data.role === 'owner', role: data.role });
+  if (HOST_KEY && data.role !== 'host') HOST_KEY = null; // 저장된 관리 키가 맞지 않으면 버린다
+  if (data.role === 'host') {
+    ROOF_STATE.hidden = data.lanterns.filter((l) => l.hidden);
+    data.lanterns = data.lanterns.filter((l) => !l.hidden);
+    ROOF_STATE.keys = { ownerKey: data.ownerKey, hostKey: data.hostKey };
+    addManageButton();
+  }
   setSkyName(data.owner);
   document.querySelector('#owner').textContent = `${data.owner}의 생일 옥상`;
   const tick = () => { document.querySelector('#date').textContent = countdownText(); };
@@ -736,6 +925,7 @@ async function startRoom() {
   }
   for (const l of data.lanterns) hangLantern(l);
   if (!before) setLitInstantly();
+  if (before) addCalendarButton();
 
   if (ROOF_STATE.isOwner) return enterRoom({ name: data.owner, color: 0xffc46b });
   const saved = store.get('visitor');
@@ -767,6 +957,14 @@ function askVisitor(saved) {
 function showDoor(count) {
   const door = document.querySelector('#door');
   door.hidden = false;
+  sound.music('door');
+  const doorSound = door.querySelector('.door-sound');
+  doorSound.addEventListener('click', async () => {
+    const on = await sound.toggle();
+    doorSound.textContent = on ? '소리 끄기' : '소리 켜고 기다리기';
+    soundBtn.setAttribute('aria-pressed', String(on));
+    soundBtn.querySelector('span').textContent = on ? '소리 끄기' : '소리 켜기';
+  });
   const title = door.querySelector('.door-title');
   const sub = door.querySelector('.door-sub');
   const cnt = door.querySelector('.door-count');
@@ -778,7 +976,7 @@ function showDoor(count) {
   render();
   const poll = setInterval(async () => {
     try {
-      const d = await api(`/api/rooftops/${ROOM_ID}?k=${encodeURIComponent(OWNER_KEY)}`);
+      const d = await api(`/api/rooftops/${ROOM_ID}${authQuery()}`);
       count = d.lanternCount ?? d.lanterns.length;
     } catch { /* 다음에 다시 */ }
   }, 15_000);
@@ -796,7 +994,7 @@ async function openDoor() {
   const door = document.querySelector('#door');
   door.classList.add('opening');
   try {
-    const d = await api(`/api/rooftops/${ROOM_ID}?k=${encodeURIComponent(OWNER_KEY)}`);
+    const d = await api(`/api/rooftops/${ROOM_ID}${authQuery()}`);
     for (const l of d.lanterns) hangLantern(l);
   } catch { /* 등불은 실시간으로 다시 받는다 */ }
   setTimeout(() => { door.hidden = true; }, 1600);
@@ -804,23 +1002,26 @@ async function openDoor() {
 }
 
 function enterRoom(visitor) {
+  sound.music('rooftop');
   const spawn = new THREE.Vector3((Math.random() - 0.5) * 4, 0, 3 + Math.random() * 2);
   me = addPerson({ name: ROOF_STATE.isOwner ? ROOF_STATE.owner : visitor.name, color: visitor.color, hatColor: 0x8fd3c1 }, spawn, { isMe: true, isOwner: ROOF_STATE.isOwner });
   countEl.textContent = '연결 중';
   conn = connectRoom({
     room: ROOM_ID,
     key: ROOF_STATE.isOwner ? OWNER_KEY : null,
+    hostKey: ROOF_STATE.role === 'host' ? HOST_KEY : null,
     hello: { name: visitor.name, color: visitor.color, hat: Math.floor(Math.random() * 4) },
     onMessage: handleNet,
     onClose: (code, fatal) => {
+      if (code === 4003) openSheet('<h2>옥상이 지워졌어요</h2><p class="sheet-lead">만든 사람이 이 옥상을 지웠어요.</p><a class="btn primary wide" href="/">새 옥상 만들기</a>', { locked: true });
       if (code === 4002) setStatus('옥상이 가득 찼어요. 잠시 후 다시 들어와주세요.', 8000);
       else if (code === 4001) setStatus('아직 문이 열리지 않았어요.', 8000);
       else countEl.textContent = '다시 연결하는 중';
       if (fatal) countEl.textContent = '연결 끊김';
     },
   });
-  document.querySelector('#btn-lantern').addEventListener('click', () => openLanternSheet(async ({ name, msg, color }) => {
-    const l = await api(`/api/rooftops/${ROOM_ID}/lanterns`, { method: 'POST', body: { name, msg, color, peerId: myId } });
+  document.querySelector('#btn-lantern').addEventListener('click', () => openLanternSheet(async ({ name, tpl, color }) => {
+    const l = await api(`/api/rooftops/${ROOM_ID}/lanterns`, { method: 'POST', body: { name, tpl, color, peerId: myId } });
     hangLantern(l, { from: me.av.root.position.clone().add(new THREE.Vector3(0, 1.6, 0)) });
     afterHang();
   }, ROOF_STATE.isOwner ? ROOF_STATE.owner : visitor.name));
@@ -857,6 +1058,11 @@ function handleNet(m) {
     }
   } else if (m.t === 'hop') {
     peersById.get(m.id)?.av.hop();
+  } else if (m.t === 'lantern-hide') {
+    removeLantern(m.id);
+    if (ROOF_STATE.role === 'host') refreshLanterns(); // 숨긴 등불 목록 갱신(신고 누적 자동 숨김 포함)
+  } else if (m.t === 'lantern-show') {
+    refreshLanterns();
   } else if (m.t === 'lantern') {
     if (m.lantern.by === myId) return; // 내가 단 등불은 이미 걸려 있다
     const who = peersById.get(m.lantern.by);
@@ -883,6 +1089,7 @@ function placeLabel(el, worldPos, yOff) {
 }
 
 const doorEl = document.querySelector('#door');
+let booted = false;
 function frame() {
   requestAnimationFrame(frame);
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -908,7 +1115,10 @@ function frame() {
   }
 
   // 실제 옥상: 자정이 되면 모두의 화면에서 점등
-  if (MODE === 'room' && me && !ignitedThisSession && serverNow() >= ROOF_STATE.igniteAt && serverNow() - ROOF_STATE.igniteAt < 120_000) {
+  if (MODE === 'room' && me && !ignitedThisSession && serverNow() >= ROOF_STATE.igniteAt && !store.get(`seen:${ROOM_ID}`) &&
+      (serverNow() - ROOF_STATE.igniteAt < 120_000 || ROOF_STATE.isOwner)) {
+    // 자정 직후에 있던 사람, 또는 자정 뒤 처음 들어온 주인공에게 점등을 한 번 보여준다(본 뒤에는 '점등 다시 보기'로)
+    store.set(`seen:${ROOM_ID}`, true);
     startIgnite();
   }
 
@@ -966,6 +1176,12 @@ function frame() {
   updateIgnite(dt);
   sparks.update(dt);
   composer.render();
+  if (!booted) {
+    booted = true;
+    const boot = document.querySelector('#boot');
+    boot?.classList.add('done');
+    setTimeout(() => boot?.remove(), 700);
+  }
 }
 
 if (MODE === 'landing') startLanding();
@@ -977,8 +1193,10 @@ frame();
 window.__lantern = {
   get mode() { return MODE; },
   get lanterns() { return lanterns.length; },
+  get slotCount() { return slots.length; },
   get people() { return people.map((p) => ({ name: p.label.textContent, me: p.isMe, x: +p.av.root.position.x.toFixed(2), z: +p.av.root.position.z.toFixed(2) })); },
   get skyOpacity() { return skyName ? skyName.material.opacity : 0; },
   get igniting() { return !!ignite; },
   walkTo(x, z) { if (me) me.target = new THREE.Vector3(x, 0, z); },
+  openLantern(i) { if (lanterns[i]) showLantern(lanterns[i]); },
 };

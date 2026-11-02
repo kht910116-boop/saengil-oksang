@@ -11,10 +11,11 @@ export async function api(path, opts = {}) {
   return data;
 }
 
-export function connectRoom({ room, key, hello, onMessage, onClose }) {
+export function connectRoom({ room, key, hostKey, hello, onMessage, onClose }) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const qs = new URLSearchParams({ room });
   if (key) qs.set('k', key);
+  if (hostKey) qs.set('h', hostKey);
   let ws;
   let closedByUs = false;
   let retry = 0;
@@ -28,7 +29,7 @@ export function connectRoom({ room, key, hello, onMessage, onClose }) {
     ws.onmessage = (e) => { try { onMessage(JSON.parse(e.data)); } catch { /* 무시 */ } };
     ws.onclose = (e) => {
       if (closedByUs) return;
-      const fatal = e.code === 4001 || e.code === 4002;
+      const fatal = e.code === 4001 || e.code === 4002 || e.code === 4003;
       onClose?.(e.code, fatal);
       if (!fatal) setTimeout(open, Math.min(8000, 800 * 2 ** retry++));
     };

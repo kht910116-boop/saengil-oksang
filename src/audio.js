@@ -1,8 +1,7 @@
-// 효과음은 모두 코드로 합성한다. BGM은 public/audio/bgm.mp3 가 있으면 재생한다.
+// 효과음은 코드로 합성하고, BGM은 public/audio/ 의 mp3 파일을 상황별로 튼다(BGM_GUIDE.md 참고).
 let ctx = null;
 let master = null;
 let ambient = null;
-let bgm = null;
 let on = false;
 
 function ensure() {
@@ -50,6 +49,56 @@ function startAmbient() {
   ambient = { src, g };
 }
 
+// BGM: 상황마다 다른 곡을 부드럽게 바꿔 튼다. 파일이 없으면 조용히 넘어간다.
+const TRACKS = {
+  rooftop: { src: '/audio/bgm-rooftop.mp3', loop: true, volume: 0.42 },
+  door: { src: '/audio/bgm-door.mp3', loop: true, volume: 0.38 },
+  midnight: { src: '/audio/bgm-midnight.mp3', loop: false, volume: 0.6 },
+  landing: { src: '/audio/bgm-rooftop.mp3', loop: true, volume: 0.32 },
+};
+const players = {};
+let wanted = null; // 지금 틀어야 하는 곡 이름
+let after = null; // 한 번만 트는 곡이 끝난 뒤 돌아갈 곡
+
+function player(name) {
+  if (players[name]) return players[name];
+  const t = TRACKS[name];
+  const a = new Audio(t.src);
+  a.loop = t.loop;
+  a.preload = 'auto';
+  a.volume = 0;
+  a.dataset.missing = '';
+  a.addEventListener('error', () => { a.dataset.missing = '1'; });
+  a.addEventListener('ended', () => { if (wanted === name && after) { const next = after; after = null; sound.music(next); } });
+  players[name] = a;
+  return a;
+}
+
+function fade(a, to, ms = 900) {
+  const from = a.volume;
+  const start = performance.now();
+  clearInterval(a._fade);
+  a._fade = setInterval(() => {
+    const k = Math.min(1, (performance.now() - start) / ms);
+    a.volume = from + (to - from) * k;
+    if (k >= 1) {
+      clearInterval(a._fade);
+      if (to === 0) a.pause();
+    }
+  }, 40);
+}
+
+function applyMusic() {
+  for (const [name, a] of Object.entries(players)) {
+    if (name !== wanted || !on) fade(a, 0);
+  }
+  if (!on || !wanted) return;
+  const a = player(wanted);
+  if (a.dataset.missing) return;
+  if (!TRACKS[wanted].loop && a.ended) a.currentTime = 0;
+  a.play().then(() => fade(a, TRACKS[wanted].volume)).catch(() => {});
+}
+
 export const sound = {
   get enabled() { return on; },
   async toggle() {
@@ -58,15 +107,30 @@ export const sound = {
     on = !on;
     master.gain.setTargetAtTime(on ? 0.8 : 0, ctx.currentTime, 0.1);
     if (on && !ambient) startAmbient();
-    if (!bgm) {
-      bgm = new Audio('/audio/bgm.mp3');
-      bgm.loop = true;
-      bgm.volume = 0.45;
-      bgm.addEventListener('error', () => { bgm.dataset.missing = '1'; });
-    }
-    if (on && !bgm.dataset.missing) bgm.play().catch(() => {});
-    if (!on && bgm) bgm.pause();
+    applyMusic();
     return on;
+  },
+  // 상황별 곡 바꾸기. thenTrack을 주면 한 번만 트는 곡이 끝난 뒤 그 곡으로 돌아간다.
+  music(name, thenTrack = null) {
+    wanted = name;
+    after = thenTrack;
+    if (name && !TRACKS[name].loop) {
+      const a = player(name);
+      try { a.currentTime = 0; } catch { /* 아직 불러오는 중 */ }
+    }
+    applyMusic();
+  },
+  // 영상 녹화용: 효과음과 BGM을 한 줄기 소리로 내보낸다
+  stream() {
+    ensure();
+    if (!sound._dest) {
+      sound._dest = ctx.createMediaStreamDestination();
+      master.connect(sound._dest);
+      for (const name of Object.keys(TRACKS)) {
+        try { ctx.createMediaElementSource(player(name)).connect(master); } catch { /* 이미 연결됨 */ }
+      }
+    }
+    return sound._dest.stream;
   },
   chime() {
     if (!on) return;

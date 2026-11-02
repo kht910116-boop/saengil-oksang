@@ -233,7 +233,8 @@ export function buildWorld(scene) {
       bulb.userData.order = order++;
       scene.add(bulb);
       bulbs.push(bulb);
-      if (i % 2 === 0) lanternSlots.push(p.clone().add(new THREE.Vector3(0, -0.55, 0)));
+      // 짝수 전구 아래가 1순위 자리, 홀수 전구 아래는 자리가 찼을 때 쓰는 2순위 자리
+      lanternSlots.push({ pos: p.clone().add(new THREE.Vector3(0, -0.55, 0)), tier: i % 2 });
     }
   }
 

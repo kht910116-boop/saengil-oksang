@@ -11,6 +11,11 @@
   <link href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Jua&display=swap" rel="stylesheet">
 </head>
 <body>
+  <div id="boot" role="status" aria-live="polite">
+    <div class="boot-lanterns" aria-hidden="true"><i></i><i></i><i></i></div>
+    <p class="boot-title">생일 옥상</p>
+    <p class="boot-sub">옥상에 불을 켜는 중이에요</p>
+  </div>
   <canvas id="scene" aria-label="밤 옥상 생일 파티 공간"></canvas>
   <div id="labels" aria-hidden="true"></div>
 
@@ -44,6 +49,7 @@
     <h2 class="door-title"></h2>
     <p class="door-sub"></p>
     <p class="door-count"></p>
+    <button class="btn door-sound" type="button">소리 켜고 기다리기</button>
   </div>
 
   <div id="sheet" hidden><div class="sheet-card"><button class="sheet-close" data-close aria-label="닫기">×</button><div class="sheet-body"></div></div></div>
