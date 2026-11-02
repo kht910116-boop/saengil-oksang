@@ -43,7 +43,20 @@ function flat(shape, color, z = 0) {
 const PAPER = 0xfbf4e8;
 const INK = 0x2a2238;
 
-export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46b } = {}) {
+function crownShape(s = 1) {
+  const sh = new THREE.Shape();
+  sh.moveTo(-0.26 * s, 0);
+  sh.lineTo(0.26 * s, 0);
+  sh.lineTo(0.3 * s, 0.26 * s);
+  sh.lineTo(0.15 * s, 0.13 * s);
+  sh.lineTo(0, 0.3 * s);
+  sh.lineTo(-0.15 * s, 0.13 * s);
+  sh.lineTo(-0.3 * s, 0.26 * s);
+  sh.closePath();
+  return sh;
+}
+
+export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46b, crown = false } = {}) {
   const root = new THREE.Group();
   const doll = new THREE.Group(); // 카메라를 바라보며 흔들리는 부분
   root.add(doll);
@@ -87,7 +100,13 @@ export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46
 
   doll.add(bodyBack, headBack, body, head, face, armL, armR);
 
-  if (hat) {
+  if (crown) {
+    const cb = flat(crownShape(1.2), PAPER, -0.02);
+    cb.position.set(0, 1.33, -0.02);
+    const c = flat(crownShape(1), 0xffd34d, 0.004);
+    c.position.set(0, 1.37, 0.004);
+    doll.add(cb, c);
+  } else if (hat) {
     const hatBack = flat(hatShape(1.18), PAPER, -0.02);
     hatBack.position.set(0, 1.36, -0.02);
     const h = flat(hatShape(1), hatColor, 0.004);

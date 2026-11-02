@@ -35,9 +35,16 @@
 
   <nav class="actions" aria-label="옥상에서 할 일">
     <button id="btn-support" class="btn ghost">전구 보태기</button>
-    <button id="btn-ignite" class="btn">점등 미리보기</button>
+    <button id="btn-ignite" class="btn" hidden>점등 미리보기</button>
     <button id="btn-lantern" class="btn primary">등불 달기</button>
   </nav>
+
+  <div id="door" hidden>
+    <div class="door-frame" aria-hidden="true"><div class="door-leaf"></div><div class="door-glow"></div></div>
+    <h2 class="door-title"></h2>
+    <p class="door-sub"></p>
+    <p class="door-count"></p>
+  </div>
 
   <div id="sheet" hidden><div class="sheet-card"><button class="sheet-close" data-close aria-label="닫기">×</button><div class="sheet-body"></div></div></div>
 

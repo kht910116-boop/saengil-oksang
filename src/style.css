@@ -186,3 +186,61 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* 모드별 */
+body[data-mode="landing"] .actions,
+body[data-mode="landing"] #joystick,
+body[data-mode="landing"] .count { display: none; }
+#btn-ignite[hidden] { display: none; }
+.name-label.is-owner { background: #ffd34d; color: var(--ink); border-color: transparent; font-family: 'Jua', sans-serif; }
+#sheet.locked .sheet-close { display: none; }
+#sheet.locked { background: rgba(12, 12, 28, 0.25); }
+
+/* 양식 추가분 */
+.field select {
+  width: 100%; font: inherit; font-size: 16px; color: var(--ink);
+  padding: 11px 12px; border-radius: 12px; border: 1.5px solid #e4d9c6; background: #fffaf2;
+}
+.field-row { display: flex; gap: 10px; }
+.field-row .field { flex: 1; min-width: 0; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #5a4f6c; margin: 2px 0 6px; }
+.check input { width: 18px; height: 18px; accent-color: var(--ink); }
+.form-error { min-height: 1.2em; margin: 4px 0 0; font-size: 13.5px; color: #b2405a; }
+.text-link { display: block; text-align: center; margin-top: 12px; font-size: 14px; color: #5a4f6c; }
+a.btn { display: block; text-align: center; text-decoration: none; }
+.sheet-card { max-height: calc(100dvh - 24px); overflow-y: auto; }
+.link-card { border: 1.5px dashed #d8ccb6; border-radius: 14px; padding: 12px 12px 10px; margin-bottom: 10px; display: grid; gap: 6px; }
+.link-card .link-title { margin: 0; font-family: 'Jua', sans-serif; font-size: 17px; }
+.link-card .link-desc { margin: 0; font-size: 13px; color: #6d6280; line-height: 1.45; }
+.link-card input { width: 100%; min-width: 0; font: inherit; font-size: 13px; padding: 9px 10px; border-radius: 10px; border: 1.5px solid #e4d9c6; background: #fffaf2; color: var(--ink); }
+.copy-status { min-height: 1.2em; margin: 2px 0 6px; font-size: 13px; color: #4f8a6e; }
+
+/* 주인공의 닫힌 문 */
+#door {
+  position: fixed; inset: 0; z-index: 20;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  padding: 24px 16px; text-align: center;
+  background: radial-gradient(ellipse at 50% 38%, #2b3260 0%, var(--night-deep) 70%);
+  transition: opacity 1.4s ease;
+}
+#door[hidden] { display: none; }
+#door.opening { opacity: 0; }
+.door-frame { position: relative; width: 150px; height: 230px; margin-bottom: 22px; }
+.door-leaf {
+  position: absolute; inset: 0; border-radius: 75px 75px 6px 6px;
+  background: linear-gradient(#5c5070, #3a3150); border: 6px solid #2a2238;
+  box-shadow: inset -8px 0 0 rgba(0, 0, 0, 0.15);
+  transform-origin: left center; transition: transform 1.4s ease;
+}
+.door-leaf::after { content: ""; position: absolute; right: 18px; top: 52%; width: 12px; height: 12px; border-radius: 50%; background: var(--bulb); }
+.door-glow {
+  position: absolute; left: -10px; right: -10px; bottom: -8px; height: 10px; border-radius: 50%;
+  background: var(--bulb); filter: blur(6px); opacity: 0.85;
+  animation: doorGlow 2.4s ease-in-out infinite;
+}
+#door.opening .door-leaf { transform: perspective(600px) rotateY(-75deg); }
+@keyframes doorGlow { 50% { opacity: 0.45; } }
+.door-title { margin: 0; font-family: 'Jua', sans-serif; font-weight: 400; font-size: clamp(22px, 6vw, 28px); text-wrap: balance; }
+.door-sub { margin: 4px 0 0; font-size: 18px; color: var(--bulb); font-variant-numeric: tabular-nums; }
+.door-count { margin: 8px 0 0; font-size: 15px; color: rgba(251, 244, 232, 0.8); }
+@media (prefers-reduced-motion: reduce) { .door-glow { animation: none; } }

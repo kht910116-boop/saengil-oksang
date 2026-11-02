@@ -5,13 +5,15 @@
   "scripts": {
     "dev": "vite --host",
     "build": "vite build",
-    "preview": "vite preview --host --port 4173"
+    "preview": "vite preview --host --port 4173",
+    "start": "node --no-warnings server/index.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "three": "^0.170.0"
+    "three": "^0.170.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "vite": "^5.4.11"

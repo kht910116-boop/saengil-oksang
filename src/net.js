@@ -1,0 +1,38 @@
+// 서버와의 통신(REST + WebSocket)
+export async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    method: opts.method || 'GET',
+    headers: opts.body ? { 'content-type': 'application/json' } : undefined,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  let data = {};
+  try { data = await res.json(); } catch { /* 빈 응답 */ }
+  if (!res.ok) throw new Error(data.error || '연결이 원활하지 않아요. 다시 시도해주세요.');
+  return data;
+}
+
+export function connectRoom({ room, key, hello, onMessage, onClose }) {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const qs = new URLSearchParams({ room });
+  if (key) qs.set('k', key);
+  let ws;
+  let closedByUs = false;
+  let retry = 0;
+  const api = {
+    send(msg) { if (ws?.readyState === 1) ws.send(JSON.stringify(msg)); },
+    close() { closedByUs = true; ws?.close(); },
+  };
+  const open = () => {
+    ws = new WebSocket(`${proto}://${location.host}/ws?${qs}`);
+    ws.onopen = () => { retry = 0; api.send({ t: 'join', ...hello }); };
+    ws.onmessage = (e) => { try { onMessage(JSON.parse(e.data)); } catch { /* 무시 */ } };
+    ws.onclose = (e) => {
+      if (closedByUs) return;
+      const fatal = e.code === 4001 || e.code === 4002;
+      onClose?.(e.code, fatal);
+      if (!fatal) setTimeout(open, Math.min(8000, 800 * 2 ** retry++));
+    };
+  };
+  open();
+  return api;
+}
