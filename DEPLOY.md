@@ -1,0 +1,47 @@
+# 배포 안내 (Railway)
+
+생일 옥상을 인터넷에 올리는 방법입니다. 설정은 모두 저장소에 들어 있어서, 아래 순서대로 누르기만 하면 됩니다. 15분 정도 걸립니다.
+
+## 왜 Railway인가
+- GitHub 저장소를 고르면 `Dockerfile`과 `railway.json`을 읽어 알아서 빌드·실행합니다.
+- 동시 접속(WebSocket)과 데이터 저장 공간(볼륨)을 지원합니다.
+- 비용은 사용량 기준이라 작게 시작할 수 있습니다(월 5달러 수준부터). 가격은 바뀔 수 있으니 가입할 때 확인하세요.
+
+## 1. 가입과 프로젝트 만들기
+1. **railway.com** 에 들어가 **GitHub로 로그인**합니다.
+2. **New Project → Deploy from GitHub repo** 를 누르고 `saengil-oksang` 저장소를 고릅니다.
+   - 저장소가 안 보이면 GitHub 권한 창에서 이 저장소 접근을 허용해 주세요.
+3. 첫 빌드가 자동으로 시작됩니다. 아직 아래 설정 전이라 한 번 실패해도 괜찮습니다.
+
+## 2. 데이터 저장 공간(볼륨) 붙이기
+옥상과 등불이 서버 재시작 뒤에도 남도록 저장 공간을 붙입니다.
+1. 서비스 화면에서 **볼륨 추가(Add Volume)** 를 고릅니다.
+2. **Mount path** 에 `/app/data` 를 적습니다.
+
+## 3. 환경 변수 넣기
+서비스의 **Variables** 탭에서 아래를 추가합니다.
+
+| 이름 | 값 |
+|---|---|
+| `ADMIN_KEY` | 아무도 모를 긴 문자열(운영자 화면 비밀번호 역할). 예: 비밀번호 생성기로 만든 32자 |
+| `IP_SALT` | 또 다른 긴 문자열(한 번 정하면 바꾸지 않기) |
+| `TRUST_PROXY` | `1` |
+
+`PORT`, `DB_PATH`, `NODE_ENV`는 넣지 않아도 됩니다(Railway와 Dockerfile이 정함).
+
+## 4. 지역과 주소
+1. **Settings → Region** 에서 한국과 가까운 **싱가포르(Southeast Asia)** 를 고릅니다. 다른 지역을 고르면 `public/privacy.html`의 서버 위치도 같이 바꿔야 합니다.
+2. **Settings → Networking → Generate Domain** 을 누르면 `○○○.up.railway.app` 주소가 생깁니다. 이게 사이트 주소입니다.
+3. 나중에 `saengiloksang.com` 같은 도메인을 사면 같은 곳의 **Custom Domain** 에 연결합니다.
+
+## 5. 확인
+- `https://(주소)/healthz` 에 `{"ok":true,...}` 가 나오면 서버가 살아 있는 것입니다.
+- `https://(주소)/r/demo` 로 샘플 옥상을 휴대폰에서 열어 봅니다.
+- 운영자 화면: `https://(주소)/admin?key=(ADMIN_KEY 값)`
+
+## 6. 비용을 줄이려면 (나중에)
+- 접속이 많아지면 Cloudflare(무료)를 도메인 앞에 두고 `/assets/`·`/audio/`·`/og.png` 를 캐시하게 하세요. 전송량 대부분이 여기서 줄어듭니다.
+- Cloudflare를 앞에 두면 WebSocket 프록시를 켜 두어야 합니다(기본으로 켜져 있음).
+
+## 업데이트
+GitHub `main` 브랜치에 새 코드가 올라가면 Railway가 자동으로 다시 배포합니다.

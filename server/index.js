@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import zlib from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
 import { WebSocketServer } from 'ws';
 import { SERVICE_NAME, MAX_LANTERNS, OWNER_EARLY_MS, RETENTION_DAYS, REPORT_HIDE_THRESHOLD, renderTemplate, validateName, GIFT_ITEMS, PAYMENT_MODE } from '../src/config.js';
@@ -208,6 +209,27 @@ function indexHtml() {
   return indexCache;
 }
 
+// 보안 헤더: 다른 사이트에 끼워 넣기 방지, 파일 형식 추측 방지, 주소 노출 최소화
+const SECURITY_HEADERS = {
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'strict-origin-when-cross-origin',
+  'x-frame-options': 'DENY',
+  'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+};
+// 글자 파일(js·css·html 등)은 압축해서 보낸다. 같은 파일은 압축 결과를 기억해 둔다.
+const COMPRESSIBLE = new Set(['.html', '.js', '.css', '.json', '.svg', '.webmanifest', '.txt']);
+const gzCache = new Map();
+function sendBody(req, res, headers, body, ext) {
+  const wantsGzip = /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+  if (wantsGzip && COMPRESSIBLE.has(ext) && body.length > 1024) {
+    body = zlib.gzipSync(body, { level: 6 });
+    headers['content-encoding'] = 'gzip';
+    headers.vary = 'Accept-Encoding';
+  }
+  res.writeHead(200, { ...SECURITY_HEADERS, ...headers, 'content-length': body.length });
+  res.end(req.method === 'HEAD' ? undefined : body);
+}
+
 function serveIndex(req, res, url) {
   const meta = pageMeta(url);
   const origin = `${req.headers['x-forwarded-proto'] || 'http'}://${req.headers.host}`;
@@ -226,8 +248,7 @@ function serveIndex(req, res, url) {
   const html = indexHtml()
     .replace(/<title>[^<]*<\/title>/, `<title>${escHtml(meta.title)}</title>`)
     .replace('</head>', `  ${tags}\n</head>`);
-  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
-  res.end(html);
+  sendBody(req, res, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' }, Buffer.from(html), '.html');
 }
 
 function serveStatic(req, res, url) {
@@ -237,10 +258,29 @@ function serveStatic(req, res, url) {
   if (!path.extname(file) && fs.existsSync(file + '.html')) file += '.html'; // /privacy → privacy.html
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory() || path.basename(file) === 'index.html') return serveIndex(req, res, url);
   const ext = path.extname(file);
-  res.writeHead(200, {
+  const headers = {
     'content-type': MIME[ext] || 'application/octet-stream',
     'cache-control': pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'public, max-age=3600',
-  });
+  };
+  if (COMPRESSIBLE.has(ext)) {
+    // 작은 글자 파일: 읽어서 압축(결과는 기억)
+    const key = file + ':' + fs.statSync(file).mtimeMs;
+    let body = gzCache.get(key);
+    if (!body) { body = fs.readFileSync(file); gzCache.set(key, body); }
+    return sendBody(req, res, headers, body, ext);
+  }
+  // 음악·이미지: 이어받기(Range)를 지원해서 휴대폰에서 곡을 앞부분부터 바로 튼다
+  const size = fs.statSync(file).size;
+  const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+  if (range) {
+    const start = range[1] ? Number(range[1]) : size - Number(range[2]);
+    const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+    if (start >= size || start < 0 || end < start) { res.writeHead(416, { 'content-range': `bytes */${size}` }); return res.end(); }
+    res.writeHead(206, { ...SECURITY_HEADERS, ...headers, 'accept-ranges': 'bytes', 'content-range': `bytes ${start}-${end}/${size}`, 'content-length': end - start + 1 });
+    return fs.createReadStream(file, { start, end }).pipe(res);
+  }
+  res.writeHead(200, { ...SECURITY_HEADERS, ...headers, 'accept-ranges': 'bytes', 'content-length': size });
+  if (req.method === 'HEAD') return res.end();
   fs.createReadStream(file).pipe(res);
 }
 
@@ -286,6 +326,11 @@ const server = http.createServer(async (req, res) => {
   // 프록시(Cloudflare 등) 뒤에 둘 때만 전달된 IP를 믿는다. 아니면 위조할 수 있다.
   const ip = (process.env.TRUST_PROXY === '1' && req.headers['x-forwarded-for']?.split(',')[0].trim()) || req.socket.remoteAddress;
   try {
+    // 호스팅 상태 확인용
+    if (url.pathname === '/healthz') {
+      db.prepare('SELECT 1').get();
+      return json(res, 200, { ok: true, rooms: rooms.size });
+    }
     // 옥상 만들기
     if (req.method === 'POST' && url.pathname === '/api/rooftops') {
       if (limited(ip, 'create', 10, 3600_000)) return json(res, 429, { error: '잠시 후 다시 만들어주세요.' });
@@ -509,3 +554,13 @@ cleanupExpired();
 setInterval(cleanupExpired, 86400_000).unref();
 
 server.listen(PORT, () => console.log(`${SERVICE_NAME} 서버: http://localhost:${PORT}`));
+
+// 호스팅이 서버를 재시작할 때: 새 연결을 받지 않고, 접속 중인 사람에게 알린 뒤 DB를 닫는다
+function shutdown(sig) {
+  console.log(`${sig}: 서버를 정리하고 종료해요.`);
+  server.close();
+  for (const room of rooms.values()) for (const p of room.values()) p.ws.close(1012, 'restart');
+  setTimeout(() => { try { db.close(); } catch { /* 이미 닫힘 */ } process.exit(0); }, 500).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

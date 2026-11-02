@@ -36,12 +36,15 @@ ADMIN_KEY=비밀키 npm start  # http://localhost:8787
 | `NODE_ENV` | `production`이면 index.html을 캐시 | |
 | `TRUST_PROXY` | `1`이면 프록시가 넘긴 접속 IP(x-forwarded-for)를 믿음. Cloudflare 등 뒤에 둘 때만 켜기 | 꺼짐 |
 
-## 배포 (호스팅 정해지면)
+## 배포
+쉬운 순서는 `DEPLOY.md`(Railway). 아래는 직접 서버에 올릴 때의 참고입니다.
+
 - Docker: `docker build -t saengil-oksang . && docker run -p 8787:8787 -v $(pwd)/data:/app/data -e ADMIN_KEY=… -e IP_SALT=… saengil-oksang`
 - 반드시 HTTPS 뒤에 두세요(WebSocket이 `wss://`로 연결됨). 프록시는 WebSocket 업그레이드를 통과시켜야 합니다.
 - 정적 파일(`/assets/`, 이미지, 음악)은 Cloudflare 같은 CDN 캐시를 붙이면 전송비가 크게 줄어듭니다.
 - 백업: `data/rooftop.db` 파일 하나만 복사하면 됩니다.
-- 호스팅 업체가 정해지면 `public/privacy.html`의 "처리 위탁" 항목에 업체명을 적어야 합니다.
+- 개인정보처리방침에는 Railway(싱가포르 지역) 기준으로 국외 이전이 적혀 있습니다. 다른 곳에 올리면 `public/privacy.html` 4항을 바꿔야 합니다.
+- 상태 확인 주소: `/healthz`
 
 ## BGM
 `public/audio/`에 상황별 곡 3개(bgm-rooftop / bgm-door / bgm-midnight)가 들어 있습니다. 소리를 켠 사람만 내려받습니다. 곡 출처와 손질 내용, 새 곡 만드는 법은 `BGM_GUIDE.md`.
