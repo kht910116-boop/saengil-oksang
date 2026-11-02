@@ -6,7 +6,9 @@
     "dev": "vite --host",
     "build": "vite build",
     "preview": "vite preview --host --port 4173",
-    "start": "node --no-warnings server/index.js"
+    "start": "node --no-warnings server/index.js",
+    "test": "node --test tests/*.test.mjs",
+    "test:e2e": "node tests/e2e/run.cjs"
   },
   "keywords": [],
   "author": "",

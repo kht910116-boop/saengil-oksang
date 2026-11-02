@@ -635,9 +635,9 @@ server.on('upgrade', (req, socket, head) => {
       let msg;
       try { msg = JSON.parse(raw); } catch { return; }
       if (msg.t === 'join' && !peer.joined) {
-        peer.joined = true;
-        // 아바타 자리가 다 찼으면 구경 모드(주인공은 언제나 아바타로)
+        // 아바타 자리가 다 찼으면 구경 모드(주인공은 언제나 아바타로). 자기 자신은 세기 전에 판단한다.
         peer.spectator = !isOwner && avatarCount(room) >= ROOM_CAP;
+        peer.joined = true;
         count(peer.spectator ? 'ws_spectator' : 'ws_join');
         const nc = validateName(msg.name);
         peer.name = isOwner ? roof.owner : nc.ok ? nc.value : '친구';
@@ -719,7 +719,7 @@ function closeEnded() {
   for (const r of q.expired.all(Date.now() - RETENTION_DAYS * 86400_000)) deleteRoof(r.id, 4004);
 }
 closeEnded();
-setInterval(closeEnded, 60_000).unref();
+setInterval(closeEnded, Number(process.env.CLOSE_CHECK_MS) || 60_000).unref(); // 시험에서는 더 짧게
 
 // 오늘(한국 시간) 더 만들 수 있는 옥상 수
 function capacity() {
