@@ -47,6 +47,6 @@ ADMIN_KEY=비밀키 npm start  # http://localhost:8787
 - `server/index.js` — HTTP·WebSocket 서버, SQLite 저장, 미리보기·운영자 화면
 - `src/config.js` — 서버와 화면이 같이 쓰는 설정(문구, 한도, 보관 기간)
 - `src/main.js` — 화면(모드: 첫 화면 / 샘플 / 실제 옥상)
-- `src/world.js` · `src/avatar.js` — 옥상과 종이 인형(모두 코드로 그림, 3D 모델 파일 없음)
+- `src/world.js` · `src/avatar.js` — 옥상과 마시멜로 인형(모두 코드로 그림, 3D 모델 파일 없음)
 - `src/audio.js` · `src/recorder.js` · `src/net.js` — 소리, 영상·캘린더, 통신
 - `public/` — 개인정보처리방침, 이용약관, 미리보기 이미지, BGM

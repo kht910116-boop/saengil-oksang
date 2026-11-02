@@ -71,6 +71,8 @@ function player(name) {
   a.addEventListener('error', () => { a.dataset.missing = '1'; });
   a.addEventListener('ended', () => { if (wanted === name && after) { const next = after; after = null; sound.music(next); } });
   players[name] = a;
+  // 녹화 중이면 새 곡도 녹화 소리에 연결
+  if (sound._dest) { try { ctx.createMediaElementSource(a).connect(master); } catch { /* 이미 연결됨 */ } }
   return a;
 }
 
@@ -114,9 +116,9 @@ export const sound = {
   music(name, thenTrack = null) {
     wanted = name;
     after = thenTrack;
-    if (name && !TRACKS[name].loop) {
-      const a = player(name);
-      try { a.currentTime = 0; } catch { /* 아직 불러오는 중 */ }
+    // 소리를 켠 사람만 곡 파일을 받는다(전송량 절약). 한 번만 트는 곡은 처음부터.
+    if (name && !TRACKS[name].loop && players[name]) {
+      try { players[name].currentTime = 0; } catch { /* 아직 불러오는 중 */ }
     }
     applyMusic();
   },
@@ -126,8 +128,8 @@ export const sound = {
     if (!sound._dest) {
       sound._dest = ctx.createMediaStreamDestination();
       master.connect(sound._dest);
-      for (const name of Object.keys(TRACKS)) {
-        try { ctx.createMediaElementSource(player(name)).connect(master); } catch { /* 이미 연결됨 */ }
+      for (const a of Object.values(players)) {
+        try { ctx.createMediaElementSource(a).connect(master); } catch { /* 이미 연결됨 */ }
       }
     }
     return sound._dest.stream;
