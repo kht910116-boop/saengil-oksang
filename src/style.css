@@ -313,3 +313,71 @@ a.btn { display: block; text-align: center; text-decoration: none; }
 .field input:disabled { opacity: .5; }
 #btn-support[hidden] { display: none; }
 .link-btn { border: 0; background: none; padding: 4px 0 0; font: inherit; font-size: 12.5px; color: #6d6280; text-decoration: underline; cursor: pointer; }
+
+/* ── 새 화면 요소 ── */
+#inapp {
+  position: fixed; left: 0; right: 0; top: 0; z-index: 25;
+  display: flex; align-items: center; gap: 8px; padding: calc(8px + var(--safe-t)) 12px 8px;
+  background: #ffc46b; color: var(--ink); font-size: 13px;
+}
+#inapp[hidden] { display: none; }
+#inapp span { flex: 1; min-width: 0; }
+#inapp button { border: 0; border-radius: 8px; padding: 6px 10px; background: var(--ink); color: var(--paper); font: inherit; font-size: 12.5px; }
+#inapp [data-close] { background: transparent; color: var(--ink); font-size: 18px; padding: 2px 6px; }
+#glfail {
+  position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  padding: 24px 16px; text-align: center; background: var(--night);
+}
+#glfail[hidden] { display: none; }
+#glfail h2 { margin: 0; font-family: 'Jua', sans-serif; font-weight: 400; font-size: 24px; }
+#glfail p { margin: 0; color: rgba(251, 244, 232, 0.8); }
+#goal {
+  margin: 6px 0 0; display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 12.5px;
+  background: var(--glass); border: 1px solid var(--line); font-variant-numeric: tabular-nums;
+}
+#goal.reached { border-color: rgba(255, 196, 107, 0.6); color: var(--bulb); }
+#goal[hidden], #thanks-banner[hidden], #closing[hidden], #cta[hidden], #reactions[hidden] { display: none; }
+#thanks-banner, #closing {
+  position: fixed; left: 50%; transform: translateX(-50%); margin: 0; z-index: 4;
+  max-width: min(92vw, 440px); text-align: center; padding: 8px 14px; border-radius: 12px; font-size: 13.5px;
+}
+#thanks-banner { top: calc(128px + var(--safe-t)); background: var(--paper); color: var(--ink); box-shadow: 0 8px 24px rgba(10, 8, 20, 0.35); }
+#closing { top: calc(168px + var(--safe-t)); background: rgba(178, 64, 90, 0.9); color: #fff; font-variant-numeric: tabular-nums; }
+#cta {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(128px + var(--safe-b)); z-index: 6;
+  width: min(92vw, 420px); display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 16px; border-radius: 16px;
+  background: var(--paper); color: var(--ink); box-shadow: 0 12px 32px rgba(10, 8, 20, 0.45);
+}
+#cta p { margin: 0; flex: 1; min-width: 0; font-size: 14px; line-height: 1.4; }
+#cta .btn.primary { white-space: nowrap; font-size: 14.5px; padding: 10px 12px; }
+#cta [data-close] { border: 0; background: transparent; font-size: 20px; color: #6d6280; padding: 0 2px; }
+#reactions {
+  position: fixed; right: 16px; bottom: calc(150px + var(--safe-b)); display: flex; flex-direction: column; gap: 8px; z-index: 3;
+}
+#reactions button {
+  width: 46px; height: 46px; border-radius: 50%; border: 1px solid var(--line); background: var(--glass); color: var(--paper);
+  font: inherit; font-size: 13px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+#reactions [data-react="heart"] { color: var(--pink); font-size: 20px; }
+#reactions [data-react="party"] { color: var(--bulb); font-size: 20px; }
+.react-float { position: absolute; left: 0; top: 0; font-family: 'Jua', sans-serif; font-size: 20px; pointer-events: none; text-shadow: 0 2px 8px rgba(10, 8, 20, 0.5); }
+.react-heart { color: var(--pink); font-size: 26px; }
+.react-party { color: var(--bulb); font-size: 26px; }
+.react-clap { color: var(--paper); }
+.is-spectator #joystick { display: none; }
+.field-hint { display: block; margin-top: 5px; font-size: 12.5px; color: #8a7f98; }
+.capacity { margin: -6px 0 12px; font-size: 13px; color: #4f8a6e; }
+.capacity:empty { display: none; }
+.capacity.full { color: #b2405a; }
+/* 등불 모아보기 */
+.letters { list-style: none; margin: 4px 0 12px; padding: 0; display: grid; gap: 10px; }
+.letters li { display: grid; grid-template-columns: 14px 1fr auto; gap: 10px; align-items: start; padding: 10px 0; border-bottom: 1px dashed #e4d9c6; }
+.letters li i { width: 12px; height: 16px; border-radius: 4px; margin-top: 4px; background: var(--c); }
+.letters li div { min-width: 0; }
+.letter-msg { margin: 0; font-size: 15px; line-height: 1.45; }
+.letter-from { margin: 3px 0 0; font-size: 12.5px; color: #6d6280; }
+.thanks-box { border: 1.5px dashed #d8ccb6; border-radius: 14px; padding: 12px; margin-bottom: 12px; }
+.tpl-btn { border: 1.5px solid #e4d9c6; background: #fffaf2; color: var(--ink); border-radius: 999px; padding: 7px 11px; font: inherit; font-size: 13.5px; cursor: pointer; }
+.tpl-btn:hover { border-color: var(--ink); }
+.thanks-box .templates { display: flex; flex-wrap: wrap; gap: 7px; margin: 8px 0 4px; }
+.rels { margin-top: 0; }

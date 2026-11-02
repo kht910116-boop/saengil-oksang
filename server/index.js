@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
 import { WebSocketServer } from 'ws';
-import { SERVICE_NAME, MAX_LANTERNS, OWNER_EARLY_MS, RETENTION_DAYS, REPORT_HIDE_THRESHOLD, renderTemplate, validateName, GIFT_ITEMS, PAYMENT_MODE } from '../src/config.js';
+import { SERVICE_NAME, MAX_LANTERNS, OWNER_EARLY_MS, RETENTION_DAYS, REPORT_HIDE_THRESHOLD, renderTemplate, validateName, GIFT_ITEMS, PAYMENT_MODE,
+  nextReveal, revealLabel, LANTERN_RELATIONS, MAX_YEARS, THANKS_TEMPLATES,
+  closeAt, MAX_ROOFTOPS_PER_DAY, MAX_DAYS_AHEAD } from '../src/config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -17,7 +19,10 @@ const DB_PATH = process.env.DB_PATH || path.join(ROOT, 'data', 'rooftop.db');
 const ADMIN_KEY = process.env.ADMIN_KEY || ''; // 비어 있으면 운영자 화면을 열지 않는다
 const IP_SALT = process.env.IP_SALT || crypto.randomBytes(16).toString('hex');
 
-const ROOM_CAP = 40;
+const ROOM_CAP = 40; // 한 옥상에 아바타로 들어올 수 있는 인원(넘치면 구경 모드)
+const SOCKET_CAP = 400; // 한 옥상의 전체 연결(구경 포함)
+const BACKUP_DIR = path.join(path.dirname(DB_PATH), 'backups');
+const BACKUP_KEEP = 7;
 const KST = 9 * 3600_000;
 
 // ── DB ──
@@ -70,17 +75,39 @@ function addColumn(table, col, def) {
 addColumn('rooftops', 'host_key', "TEXT NOT NULL DEFAULT ''");
 addColumn('lanterns', 'hidden', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('lanterns', 'reports', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('lanterns', 'rel', 'INTEGER NOT NULL DEFAULT -1');
+addColumn('lanterns', 'years', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('rooftops', 'ref', "TEXT NOT NULL DEFAULT ''");
+addColumn('rooftops', 'reveal_hour', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('rooftops', 'thanks', 'INTEGER NOT NULL DEFAULT -1');
+addColumn('rooftops', 'candles_out', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('rooftops', 'end_at', 'INTEGER NOT NULL DEFAULT 0');
+// 이전 옥상들에도 닫는 시각을 채운다
+for (const r of db.prepare('SELECT id, ignite_at FROM rooftops WHERE end_at = 0').all()) db.prepare('UPDATE rooftops SET end_at = ? WHERE id = ?').run(closeAt(r.ignite_at), r.id);
+db.exec(`
+  CREATE TABLE IF NOT EXISTS metrics (day TEXT NOT NULL, type TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, type));
+  CREATE TABLE IF NOT EXISTS client_errors (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, msg TEXT NOT NULL, place TEXT NOT NULL, ua TEXT NOT NULL);
+`);
 
 const q = {
-  insertRoof: db.prepare('INSERT INTO rooftops (id, owner, ignite_at, owner_key, host_key, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
+  insertRoof: db.prepare('INSERT INTO rooftops (id, owner, ignite_at, owner_key, host_key, created_at, ref, reveal_hour, end_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+  ended: db.prepare('SELECT id FROM rooftops WHERE end_at > 0 AND end_at <= ?'),
+  metricToday: db.prepare('SELECT n FROM metrics WHERE day = ? AND type = ?'),
+  setThanks: db.prepare('UPDATE rooftops SET thanks = ? WHERE id = ?'),
+  setCandles: db.prepare('UPDATE rooftops SET candles_out = 1 WHERE id = ?'),
+  metric: db.prepare('INSERT INTO metrics (day, type, n) VALUES (?, ?, 1) ON CONFLICT(day, type) DO UPDATE SET n = n + 1'),
+  metricsSince: db.prepare('SELECT day, type, n FROM metrics WHERE day >= ? ORDER BY day DESC'),
+  insertError: db.prepare('INSERT INTO client_errors (at, msg, place, ua) VALUES (?, ?, ?, ?)'),
+  recentErrors: db.prepare('SELECT at, msg, place, ua FROM client_errors ORDER BY id DESC LIMIT 50'),
+  pruneErrors: db.prepare('DELETE FROM client_errors WHERE id <= (SELECT MAX(id) FROM client_errors) - 500'),
   getRoof: db.prepare('SELECT * FROM rooftops WHERE id = ?'),
   deleteRoof: db.prepare('DELETE FROM rooftops WHERE id = ?'),
   deleteRoofLanterns: db.prepare('DELETE FROM lanterns WHERE rooftop_id = ?'),
-  visibleLanterns: db.prepare('SELECT id, name, msg, color, slot FROM lanterns WHERE rooftop_id = ? AND hidden = 0 ORDER BY id'),
-  allLanterns: db.prepare('SELECT id, name, msg, color, slot, hidden FROM lanterns WHERE rooftop_id = ? ORDER BY id'),
+  visibleLanterns: db.prepare('SELECT id, name, msg, color, slot, rel, years FROM lanterns WHERE rooftop_id = ? AND hidden = 0 ORDER BY id'),
+  allLanterns: db.prepare('SELECT id, name, msg, color, slot, hidden, rel, years FROM lanterns WHERE rooftop_id = ? ORDER BY id'),
   countVisible: db.prepare('SELECT COUNT(*) AS n FROM lanterns WHERE rooftop_id = ? AND hidden = 0'),
   nextSlot: db.prepare('SELECT COALESCE(MAX(slot) + 1, 0) AS n, COUNT(*) AS total FROM lanterns WHERE rooftop_id = ?'),
-  insertLantern: db.prepare('INSERT INTO lanterns (rooftop_id, name, msg, color, slot, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
+  insertLantern: db.prepare('INSERT INTO lanterns (rooftop_id, name, msg, color, slot, created_at, rel, years) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
   getLantern: db.prepare('SELECT * FROM lanterns WHERE id = ? AND rooftop_id = ?'),
   setHidden: db.prepare('UPDATE lanterns SET hidden = ? WHERE id = ?'),
   addReport: db.prepare('INSERT OR IGNORE INTO lantern_reports (lantern_id, reporter, created_at) VALUES (?, ?, ?)'),
@@ -99,13 +126,16 @@ const q = {
 // ── 입력 검사 ──
 const COLORS = new Set([0xffc46b, 0xf29bb3, 0x8fd3c1, 0xb9a6f2, 0xfbf4e8]);
 
-// 생일(월/일) → 다음 자정(한국 시간)의 시각. 생일 당일 하루 동안은 이미 켜진 옥상으로 본다.
-export function nextBirthdayMidnight(month, day, now = Date.now()) {
-  let year = new Date(now + KST).getUTCFullYear();
-  const at = (y) => Date.UTC(y, month - 1, day) - KST;
-  if (at(year) + 86400_000 <= now) year += 1;
-  return at(year);
+// 생일 공개 시각 계산은 src/config.js 의 nextReveal(2월 29일 처리 포함)을 쓴다
+export const nextBirthdayMidnight = (month, day, now) => nextReveal(month, day, 0, now);
+
+// 측정: 날짜별 이벤트 수만 센다(누가 했는지는 남기지 않음)
+const kstDay = (ms = Date.now()) => new Date(ms + KST).toISOString().slice(0, 10);
+function count(type) {
+  try { q.metric.run(kstDay(), type); } catch { /* 측정 실패는 서비스에 영향 없음 */ }
 }
+const CLIENT_EVENTS = new Set(['landing_visit', 'demo_visit', 'friend_visit', 'owner_door', 'owner_enter', 'ignite_seen', 'letters_open',
+  'share_click', 'cta_click', 'photo_save', 'video_save', 'calendar_click', 'react', 'inapp_open_external', 'webgl_fail']);
 
 function clean(s, max) {
   return String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max);
@@ -163,7 +193,12 @@ const doorOpen = (roof) => Date.now() >= roof.ignite_at - OWNER_EARLY_MS;
 const giftView = (g) => ({ id: g.id, item: g.item, name: g.anonymous ? '' : g.name, anonymous: !!g.anonymous, color: g.color, x: g.x, z: g.z });
 
 function roofView(roof, role) {
-  const body = { id: roof.id, owner: roof.owner, igniteAt: roof.ignite_at, now: Date.now(), role, maxLanterns: MAX_LANTERNS, paymentMode: PAYMENT_MODE };
+  const body = {
+    id: roof.id, owner: roof.owner, igniteAt: roof.ignite_at, now: Date.now(), role, maxLanterns: MAX_LANTERNS, paymentMode: PAYMENT_MODE,
+    endAt: roof.end_at,
+    thanks: roof.thanks >= 0 ? THANKS_TEMPLATES[roof.thanks] || null : null,
+    candlesOut: !!roof.candles_out,
+  };
   const gifts = q.gifts.all(roof.id);
   if (role === 'owner' && !doorOpen(roof)) { body.gifts = []; body.giftCount = gifts.length; }
   else body.gifts = gifts.map(giftView);
@@ -184,23 +219,18 @@ function roofView(roof, role) {
 // ── 정적 파일 + 카카오톡/SNS 미리보기 ──
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.webmanifest': 'application/manifest+json', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.ics': 'text/calendar; charset=utf-8' };
 
-function kstLabel(ms) {
-  const d = new Date(ms + KST);
-  return `${d.getUTCMonth() + 1}월 ${d.getUTCDate()}일`;
-}
-
 function pageMeta(url) {
   const m = url.pathname.match(/^\/r\/([\w-]{4,16})\/?$/);
-  const base = { title: `${SERVICE_NAME} · 친구 생일 자정에 다 같이 불을 켜요`, desc: '친구들이 등불을 모으는 동안 주인공은 문밖에서 기다려요. 생일 자정이 되면 문이 열리고 모두의 화면에서 함께 불이 켜져요.' };
+  const base = { title: `${SERVICE_NAME} · 친구 생일에 다 같이 불을 켜요`, desc: '친구들이 등불을 모으는 동안 주인공은 문밖에서 기다려요. 정한 시각이 되면 문이 열리고 모두의 화면에서 함께 불이 켜져요.' };
   if (!m) return base;
-  if (m[1] === 'demo') return { title: `민지의 생일 옥상 (샘플) · ${SERVICE_NAME}`, desc: '등불을 달고 자정 점등을 미리 볼 수 있는 샘플 옥상이에요.' };
+  if (m[1] === 'demo') return { title: `민지의 생일 옥상 (샘플) · ${SERVICE_NAME}`, desc: '등불을 달고 점등을 미리 볼 수 있는 샘플 옥상이에요.' };
   const roof = q.getRoof.get(m[1]);
   if (!roof) return base;
   const role = roleOf(roof, { k: url.searchParams.get('k'), h: url.searchParams.get('h') });
-  const date = kstLabel(roof.ignite_at);
-  if (role === 'owner') return { title: `${roof.owner}님, 옥상 문이 ${date} 자정에 열려요`, desc: '친구들이 문 너머에서 무언가를 준비하고 있어요. 자정에 들어와 주세요.' };
+  const when = revealLabel(roof.ignite_at);
+  if (role === 'owner') return { title: `${roof.owner}님, 옥상 문이 ${when}에 열려요`, desc: '친구들이 문 너머에서 무언가를 준비하고 있어요. 그 시각에 들어와 주세요.' };
   const n = q.countVisible.get(roof.id).n;
-  return { title: `${roof.owner}의 생일 옥상에 등불을 달아주세요`, desc: `${date} 자정에 다 같이 불을 켜요.${n ? ` 지금 등불 ${n}개가 모였어요.` : ''} ${roof.owner}에게는 비밀이에요.` };
+  return { title: `${roof.owner}의 생일 옥상에 등불을 달아주세요`, desc: `${when}에 다 같이 불을 켜요.${n ? ` 지금 등불 ${n}개가 모였어요.` : ''} ${roof.owner}에게는 비밀이에요.` };
 }
 
 let indexCache = null;
@@ -302,17 +332,64 @@ function adminPage(res, key, notice = '') {
   res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex' });
   res.end(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>운영자 · ${SERVICE_NAME}</title>
 <style>body{font-family:system-ui,sans-serif;margin:0;padding:16px;background:#f6f3ee;color:#2a2238}h1{font-size:20px}table{width:100%;border-collapse:collapse;background:#fff}td,th{border-bottom:1px solid #e4dccf;padding:8px;text-align:left;vertical-align:top;font-size:14px}tr.hidden{opacity:.55}button{font:inherit;padding:6px 10px;border-radius:8px;border:1px solid #c9bfae;background:#fff;margin:2px 0;cursor:pointer}button.danger{color:#b2405a;border-color:#e3b3bf}.notice{background:#e7f3ec;padding:8px 12px;border-radius:8px}.wrap{overflow-x:auto}</style></head>
-<body><h1>신고된 등불</h1>${notice ? `<p class="notice">${escHtml(notice)}</p>` : ''}<p>신고 ${REPORT_HIDE_THRESHOLD}건이 쌓이면 자동으로 숨겨져요.</p>
+<body><p><a href="/admin/stats?key=${encodeURIComponent(key)}">통계와 오류 보기</a> · <a href="/admin/backup?key=${encodeURIComponent(key)}">지금 백업 내려받기</a></p><h1>신고된 등불</h1>${notice ? `<p class="notice">${escHtml(notice)}</p>` : ''}<p>신고 ${REPORT_HIDE_THRESHOLD}건이 쌓이면 자동으로 숨겨져요.</p>
 <div class="wrap"><table><thead><tr><th>옥상</th><th>등불</th><th>신고</th><th>상태</th><th>처리</th></tr></thead><tbody>${rows || '<tr><td colspan="5">신고된 등불이 없어요.</td></tr>'}</tbody></table></div></body></html>`);
 }
 
-function deleteRoof(roofId) {
+// 운영자 통계: 최근 14일 이벤트 수와 핵심 비율, 최근 화면 오류
+function statsPage(res) {
+  const since = kstDay(Date.now() - 13 * 86400_000);
+  const rows = q.metricsSince.all(since);
+  const days = [...new Set(rows.map((r) => r.day))].sort().reverse();
+  const types = [...new Set(rows.map((r) => r.type))].sort();
+  const get = (d, t) => rows.find((r) => r.day === d && r.type === t)?.n || 0;
+  const sum = (t) => rows.filter((r) => r.type === t).reduce((a, r) => a + r.n, 0);
+  const ratio = (a, b) => (b ? (a / b).toFixed(2) : '-');
+  const created = sum('rooftop_created');
+  const kpis = [
+    ['만든 옥상', created],
+    ['다른 옥상에서 이어서 만든 옥상(퍼짐)', `${sum('rooftop_created_ref')} (${created ? Math.round((sum('rooftop_created_ref') / created) * 100) : 0}%)`],
+    ['옥상당 친구 방문', ratio(sum('friend_visit'), created)],
+    ['옥상당 등불', ratio(sum('lantern_added'), created)],
+    ['옥상당 선물', ratio(sum('gift_added'), created)],
+    ['주인공 입장 / 문 앞 대기', `${sum('owner_enter')} / ${sum('owner_door')}`],
+    ['"내 옥상 만들기" 누름', sum('cta_click')],
+    ['기념사진 저장', sum('photo_save')],
+    ['화면 오류', sum('client_error')],
+  ];
+  const errs = q.recentErrors.all();
+  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex' });
+  res.end(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>통계 · ${SERVICE_NAME}</title>
+<style>body{font-family:system-ui,sans-serif;margin:0;padding:16px;background:#f6f3ee;color:#2a2238}h1{font-size:20px}h2{font-size:16px;margin-top:24px}table{border-collapse:collapse;background:#fff;font-size:13px}td,th{border-bottom:1px solid #e4dccf;padding:6px 8px;text-align:left;white-space:nowrap}.wrap{overflow-x:auto}.kpi td:last-child{font-weight:700;font-variant-numeric:tabular-nums}</style></head>
+<body><h1>최근 14일</h1><div class="wrap"><table class="kpi">${kpis.map(([k, v]) => `<tr><td>${escHtml(k)}</td><td>${escHtml(v)}</td></tr>`).join('')}</table></div>
+<h2>날짜별</h2><div class="wrap"><table><thead><tr><th>이벤트</th>${days.map((d) => `<th>${d.slice(5)}</th>`).join('')}</tr></thead><tbody>
+${types.map((t) => `<tr><td>${escHtml(t)}</td>${days.map((d) => `<td>${get(d, t) || ''}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+<h2>최근 화면 오류</h2><div class="wrap"><table><thead><tr><th>시각</th><th>내용</th><th>위치</th><th>기기</th></tr></thead><tbody>
+${errs.map((e) => `<tr><td>${new Date(e.at + KST).toISOString().slice(5, 16).replace('T', ' ')}</td><td>${escHtml(e.msg)}</td><td>${escHtml(e.place)}</td><td>${escHtml(e.ua.slice(0, 60))}</td></tr>`).join('') || '<tr><td colspan="4">없어요</td></tr>'}</tbody></table></div></body></html>`);
+}
+
+// 백업: 하루 한 번 DB 스냅숏을 만들고 최근 7개만 남긴다. 운영자는 /admin/backup 으로 내려받아 다른 곳에 보관한다.
+function makeBackup(force = false) {
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  const file = path.join(BACKUP_DIR, `rooftop-${kstDay()}.db`);
+  if (force || !fs.existsSync(file)) {
+    const tmp = `${file}.tmp`;
+    fs.rmSync(tmp, { force: true });
+    db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
+    fs.renameSync(tmp, file);
+    const old = fs.readdirSync(BACKUP_DIR).filter((f) => /^rooftop-\d{4}-\d{2}-\d{2}\.db$/.test(f)).sort().reverse().slice(BACKUP_KEEP);
+    for (const f of old) fs.rmSync(path.join(BACKUP_DIR, f), { force: true });
+  }
+  return file;
+}
+
+function deleteRoof(roofId, closeCode = 4003) {
   q.deleteRoofGifts.run(roofId);
   q.deleteReportsOfRoof.run(roofId);
   q.deleteRoofLanterns.run(roofId);
   q.deleteRoof.run(roofId);
   const room = rooms.get(roofId);
-  if (room) for (const p of room.values()) p.ws.close(4003, 'deleted');
+  if (room) for (const p of room.values()) p.ws.close(closeCode, closeCode === 4004 ? 'ended' : 'deleted');
 }
 
 function setLanternHidden(roofId, lanternId, hidden) {
@@ -331,9 +408,15 @@ const server = http.createServer(async (req, res) => {
       db.prepare('SELECT 1').get();
       return json(res, 200, { ok: true, rooms: rooms.size });
     }
+    // 오늘 더 만들 수 있는 옥상 수
+    if (req.method === 'GET' && url.pathname === '/api/capacity') {
+      return json(res, 200, capacity());
+    }
     // 옥상 만들기
     if (req.method === 'POST' && url.pathname === '/api/rooftops') {
-      if (limited(ip, 'create', 10, 3600_000)) return json(res, 429, { error: '잠시 후 다시 만들어주세요.' });
+      if (capacity().left <= 0) return json(res, 429, { error: '오늘 만들 수 있는 옥상이 다 찼어요. 내일 0시에 다시 열려요.', full: true });
+      // 남용 방지: 한 사람이 한 시간에 5개, 하루에 20개까지
+      if (limited(ip, 'create', 5, 3600_000) || limited(ip, 'create-day', 20, 86400_000)) return json(res, 429, { error: '옥상을 너무 많이 만들었어요. 잠시 후 다시 만들어주세요.' });
       const b = await readBody(req);
       const ownerCheck = validateName(b.owner);
       if (!ownerCheck.ok) return json(res, 400, { error: `주인공 ${ownerCheck.error}` });
@@ -342,10 +425,21 @@ const server = http.createServer(async (req, res) => {
       const day = Number(b.day);
       const maxDay = new Date(Date.UTC(2024, month, 0)).getUTCDate(); // 윤년 기준(2월 29일 허용)
       if (!(month >= 1 && month <= 12 && day >= 1 && day <= maxDay)) return json(res, 400, { error: '생일 날짜를 확인해주세요.' });
+      const hour = b.hour === undefined ? 0 : Number(b.hour);
+      if (!(Number.isInteger(hour) && hour >= 0 && hour <= 23)) return json(res, 400, { error: '공개 시각을 다시 골라주세요.' });
       const test = Number(b.testSeconds);
-      const igniteAt = test > 0 && test <= 600 ? Date.now() + test * 1000 : nextBirthdayMidnight(month, day);
+      const isTest = test > 0 && test <= 600;
+      const igniteAt = isTest ? Date.now() + test * 1000 : nextReveal(month, day, hour);
+      if (!isTest && igniteAt - Date.now() > MAX_DAYS_AHEAD * 86400_000) return json(res, 400, { error: `생일 ${MAX_DAYS_AHEAD}일 전부터 옥상을 만들 수 있어요.` });
+      // 시험용 옥상은 점등 10분 뒤(시험 코드는 testEndSeconds로 더 짧게) 닫는다
+      const testEnd = Number(b.testEndSeconds);
+      const endAt = isTest ? igniteAt + (testEnd > 0 && testEnd <= 600 ? testEnd * 1000 : 600_000) : closeAt(igniteAt);
+      // 다른 옥상에서 "내 옥상도 만들기"로 왔으면 출처를 남긴다(퍼짐 측정)
+      const ref = typeof b.ref === 'string' && /^[\w-]{4,16}$/.test(b.ref) && q.getRoof.get(b.ref) ? b.ref : '';
       const id = crypto.randomBytes(5).toString('base64url');
-      q.insertRoof.run(id, owner, igniteAt, crypto.randomBytes(9).toString('base64url'), crypto.randomBytes(9).toString('base64url'), Date.now());
+      q.insertRoof.run(id, owner, igniteAt, crypto.randomBytes(9).toString('base64url'), crypto.randomBytes(9).toString('base64url'), Date.now(), ref, hour, endAt);
+      count('rooftop_created');
+      if (ref) count('rooftop_created_ref');
       return json(res, 201, roofView(q.getRoof.get(id), 'host'));
     }
 
@@ -374,13 +468,52 @@ const server = http.createServer(async (req, res) => {
       const r = q.insertGift.run(roof.id, item, anonymous ? '' : name, anonymous ? 1 : 0, color, x, z, 0, 'free', Date.now());
       const gift = giftView({ id: Number(r.lastInsertRowid), item, name: anonymous ? '' : name, anonymous, color, x, z });
       broadcast(roof.id, { t: 'gift', gift: { ...gift, by: clean(b.peerId, 12) } });
+      count('gift_added');
       return json(res, 201, gift);
+    }
+
+    // 주인공의 답례·촛불 끄기
+    const om = url.pathname.match(/^\/api\/rooftops\/([\w-]{4,16})\/(thanks|candles)$/);
+    if (om && req.method === 'POST') {
+      const roof = q.getRoof.get(om[1]);
+      if (!roof) return json(res, 404, { error: '옥상을 찾을 수 없어요. 링크를 다시 확인해주세요.' });
+      const b = await readBody(req);
+      if (roleOf(roof, b) !== 'owner') return json(res, 403, { error: '주인공만 할 수 있어요.' });
+      if (Date.now() < roof.ignite_at) return json(res, 403, { error: '점등 뒤에 할 수 있어요.' });
+      if (om[2] === 'thanks') {
+        const tpl = Number(b.tpl);
+        if (!Number.isInteger(tpl) || !THANKS_TEMPLATES[tpl]) return json(res, 400, { error: '답례 문구를 골라주세요.' });
+        q.setThanks.run(tpl, roof.id);
+        broadcast(roof.id, { t: 'thanks', text: THANKS_TEMPLATES[tpl] });
+        count('thanks_sent');
+        return json(res, 200, { ok: true, text: THANKS_TEMPLATES[tpl] });
+      }
+      if (!roof.candles_out) { q.setCandles.run(roof.id); count('candles_blown'); }
+      broadcast(roof.id, { t: 'candles' });
+      return json(res, 200, { ok: true });
+    }
+
+    // 화면에서 보내는 측정 이벤트(종류만, 개인 정보 없음)
+    if (url.pathname === '/api/events' && req.method === 'POST') {
+      if (limited(ip, 'events', 200, 600_000)) return json(res, 429, { ok: false });
+      const b = await readBody(req);
+      if (CLIENT_EVENTS.has(b.type)) count(b.type);
+      return json(res, 200, { ok: true });
+    }
+    // 화면에서 난 오류 기록(운영자가 보도록)
+    if (url.pathname === '/api/client-errors' && req.method === 'POST') {
+      if (limited(ip, 'cerr', 20, 600_000)) return json(res, 429, { ok: false });
+      const b = await readBody(req);
+      q.insertError.run(Date.now(), clean(b.msg, 300) || '(내용 없음)', clean(b.place, 120), clean(req.headers['user-agent'], 160));
+      q.pruneErrors.run();
+      count('client_error');
+      return json(res, 200, { ok: true });
     }
 
     const m = url.pathname.match(/^\/api\/rooftops\/([\w-]{4,16})(?:\/lanterns(?:\/(\d+)\/(hide|show|report))?)?$/);
     if (m) {
       const roof = q.getRoof.get(m[1]);
-      if (!roof) return json(res, 404, { error: '옥상을 찾을 수 없어요. 링크를 다시 확인해주세요.' });
+      if (!roof) return json(res, 404, { error: '옥상을 찾을 수 없어요. 이미 닫힌 옥상이거나 링크가 잘못됐어요.' });
       const isLanternPath = url.pathname.includes('/lanterns');
 
       if (req.method === 'GET' && !isLanternPath) {
@@ -405,11 +538,14 @@ const server = http.createServer(async (req, res) => {
         const color = Number(b.color);
         if (!msg) return json(res, 400, { error: '등불에 담을 문구를 골라주세요.' });
         if (!COLORS.has(color)) return json(res, 400, { error: '등불 색을 다시 골라주세요.' });
+        const rel = Number.isInteger(b.rel) && b.rel >= 0 && b.rel < LANTERN_RELATIONS.length ? b.rel : -1;
+        const years = Number.isInteger(b.years) && b.years >= 0 && b.years <= MAX_YEARS ? b.years : 0;
         const { n, total } = q.nextSlot.get(roof.id);
         if (total >= MAX_LANTERNS) return json(res, 409, { error: '이 옥상의 전구 줄이 가득 찼어요.' });
-        const r = q.insertLantern.run(roof.id, name, msg, color, n, Date.now());
-        const lantern = { id: Number(r.lastInsertRowid), name, msg, color, slot: n, by: clean(b.peerId, 12) };
+        const r = q.insertLantern.run(roof.id, name, msg, color, n, Date.now(), rel, years);
+        const lantern = { id: Number(r.lastInsertRowid), name, msg, color, slot: n, rel, years, by: clean(b.peerId, 12) };
         broadcast(roof.id, { t: 'lantern', lantern });
+        count('lantern_added');
         return json(res, 201, lantern);
       }
 
@@ -440,6 +576,16 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/admin' && req.method === 'GET') {
       if (!ADMIN_KEY || !safeEq(url.searchParams.get('key') || '', ADMIN_KEY)) { res.writeHead(404); return res.end(); }
       return adminPage(res, ADMIN_KEY, url.searchParams.get('done') || '');
+    }
+    if (url.pathname === '/admin/stats' && req.method === 'GET') {
+      if (!ADMIN_KEY || !safeEq(url.searchParams.get('key') || '', ADMIN_KEY)) { res.writeHead(404); return res.end(); }
+      return statsPage(res);
+    }
+    if (url.pathname === '/admin/backup' && req.method === 'GET') {
+      if (!ADMIN_KEY || !safeEq(url.searchParams.get('key') || '', ADMIN_KEY)) { res.writeHead(404); return res.end(); }
+      const file = makeBackup(true);
+      res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename="${path.basename(file)}"`, 'cache-control': 'no-store' });
+      return fs.createReadStream(file).pipe(res);
     }
     if (url.pathname === '/admin/action' && req.method === 'POST') {
       const b = await readBody(req);
@@ -481,8 +627,8 @@ server.on('upgrade', (req, socket, head) => {
     if (isOwner && !doorOpen(roof)) return ws.close(4001, 'locked');
     const room = rooms.get(roof.id) || new Map();
     rooms.set(roof.id, room);
-    if (room.size >= ROOM_CAP) return ws.close(4002, 'full');
-    const peer = { id: crypto.randomBytes(4).toString('hex'), ws, isOwner, joined: false, name: '', color: 0xf29bb3, hat: 0, x: 0, z: 3, dx: 0, dirty: false, last: 0 };
+    if (room.size >= SOCKET_CAP) return ws.close(4002, 'full');
+    const peer = { id: crypto.randomBytes(4).toString('hex'), ws, isOwner, joined: false, spectator: false, name: '', color: 0xf29bb3, hat: 0, x: 0, z: 3, dx: 0, dirty: false, last: 0, lastHop: 0, lastReact: 0 };
     room.set(peer.id, peer);
 
     ws.on('message', (raw) => {
@@ -490,15 +636,18 @@ server.on('upgrade', (req, socket, head) => {
       try { msg = JSON.parse(raw); } catch { return; }
       if (msg.t === 'join' && !peer.joined) {
         peer.joined = true;
+        // 아바타 자리가 다 찼으면 구경 모드(주인공은 언제나 아바타로)
+        peer.spectator = !isOwner && avatarCount(room) >= ROOM_CAP;
+        count(peer.spectator ? 'ws_spectator' : 'ws_join');
         const nc = validateName(msg.name);
         peer.name = isOwner ? roof.owner : nc.ok ? nc.value : '친구';
         peer.color = COLORS.has(Number(msg.color)) ? Number(msg.color) : 0xf29bb3;
         peer.hat = Math.abs(Number(msg.hat) || 0) % 4;
-        const others = [...room.values()].filter((p) => p.joined && p.id !== peer.id).map(view);
-        ws.send(JSON.stringify({ t: 'welcome', you: peer.id, peers: others, now: Date.now() }));
-        broadcast(roof.id, { t: 'join', peer: view(peer) }, peer.id);
-        broadcast(roof.id, { t: 'count', n: joinedCount(room) });
-      } else if (msg.t === 'pos' && peer.joined) {
+        const others = [...room.values()].filter((p) => p.joined && !p.spectator && p.id !== peer.id).map(view);
+        ws.send(JSON.stringify({ t: 'welcome', you: peer.id, peers: others, now: Date.now(), spectator: peer.spectator }));
+        if (!peer.spectator) broadcast(roof.id, { t: 'join', peer: view(peer) }, peer.id);
+        broadcast(roof.id, countMsg(room));
+      } else if (msg.t === 'pos' && peer.joined && !peer.spectator) {
         const now = Date.now();
         if (now - peer.last < 60) return;
         peer.last = now;
@@ -506,15 +655,23 @@ server.on('upgrade', (req, socket, head) => {
         peer.z = clampNum(msg.z, -10, 10);
         peer.dx = clampNum(msg.dx, -1, 1);
         peer.dirty = true;
-      } else if (msg.t === 'hop' && peer.joined) {
+      } else if (msg.t === 'hop' && peer.joined && !peer.spectator) {
+        const now = Date.now();
+        if (now - peer.lastHop < 1000) return; // 도배 방지
+        peer.lastHop = now;
         broadcast(roof.id, { t: 'hop', id: peer.id }, peer.id);
+      } else if (msg.t === 'react' && peer.joined && REACTIONS.has(msg.kind)) {
+        const now = Date.now();
+        if (now - peer.lastReact < 700) return; // 도배 방지
+        peer.lastReact = now;
+        broadcast(roof.id, { t: 'react', id: peer.spectator ? null : peer.id, kind: msg.kind }, peer.id);
       }
     });
     ws.on('close', () => {
       room.delete(peer.id);
       if (peer.joined) {
-        broadcast(roof.id, { t: 'leave', id: peer.id });
-        broadcast(roof.id, { t: 'count', n: joinedCount(room) });
+        if (!peer.spectator) broadcast(roof.id, { t: 'leave', id: peer.id });
+        broadcast(roof.id, countMsg(room));
       }
       if (!room.size) rooms.delete(roof.id);
     });
@@ -524,10 +681,17 @@ server.on('upgrade', (req, socket, head) => {
 function view(p) {
   return { id: p.id, name: p.name, color: p.color, hat: p.hat, x: p.x, z: p.z, owner: p.isOwner };
 }
-function joinedCount(room) {
+const REACTIONS = new Set(['clap', 'heart', 'party']);
+function avatarCount(room) {
   let n = 0;
-  for (const p of room.values()) if (p.joined) n++;
+  for (const p of room.values()) if (p.joined && !p.spectator) n++;
   return n;
+}
+function countMsg(room) {
+  let n = 0;
+  let watching = 0;
+  for (const p of room.values()) if (p.joined) { if (p.spectator) watching++; else n++; }
+  return { t: 'count', n, watching };
 }
 function clampNum(v, a, b) {
   const n = Number(v);
@@ -543,15 +707,29 @@ setInterval(() => {
   }
 }, 100);
 
-// 보관 기간이 지난 옥상 삭제(하루 한 번)
-function cleanupExpired() {
-  const cutoff = Date.now() - RETENTION_DAYS * 86400_000;
-  const rows = q.expired.all(cutoff);
-  for (const r of rows) deleteRoof(r.id);
-  if (rows.length) console.log(`보관 기간이 지난 옥상 ${rows.length}개를 삭제했어요.`);
+// 하루짜리 옥상: 닫는 시각(생일 다음 날 0시 5분)이 지난 옥상은 접속자에게 알리고 지운다(매분 확인)
+function closeEnded() {
+  const rows = q.ended.all(Date.now());
+  for (const r of rows) {
+    broadcast(r.id, { t: 'ended' });
+    deleteRoof(r.id, 4004);
+  }
+  if (rows.length) console.log(`닫는 시각이 지난 옥상 ${rows.length}개를 닫고 지웠어요.`);
+  // 혹시 닫는 시각이 없는 오래된 옥상(보관 기간 초과)도 지운다
+  for (const r of q.expired.all(Date.now() - RETENTION_DAYS * 86400_000)) deleteRoof(r.id, 4004);
 }
-cleanupExpired();
-setInterval(cleanupExpired, 86400_000).unref();
+closeEnded();
+setInterval(closeEnded, 60_000).unref();
+
+// 오늘(한국 시간) 더 만들 수 있는 옥상 수
+function capacity() {
+  const made = q.metricToday.get(kstDay(), 'rooftop_created')?.n || 0;
+  const d = new Date(Date.now() + KST);
+  const resetAt = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1) - KST;
+  return { left: Math.max(0, MAX_ROOFTOPS_PER_DAY - made), max: MAX_ROOFTOPS_PER_DAY, resetAt };
+}
+try { makeBackup(); } catch (e) { console.error('백업 실패', e.message); }
+setInterval(() => { try { makeBackup(); } catch (e) { console.error('백업 실패', e.message); } }, 3600_000).unref(); // 매시간 확인, 하루 한 번 생성
 
 server.listen(PORT, () => console.log(`${SERVICE_NAME} 서버: http://localhost:${PORT}`));
 

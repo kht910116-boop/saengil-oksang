@@ -276,9 +276,24 @@ export function buildWorld(scene) {
   moonMesh.position.set(-70, 60, -110);
   scene.add(moonMesh);
 
-  function update(t) {
-    for (const f of flames) f.scale.set(1 + Math.sin(t * 17 + f.position.x * 40) * 0.12, 1.6 + Math.sin(t * 23 + f.position.z * 30) * 0.25, 1);
-    candleLight.intensity = 3.4 + Math.sin(t * 13) * 0.4 + Math.sin(t * 29) * 0.25;
+  let candlesLit = true;
+  // 주인공이 촛불을 끄면 불꽃이 작아지며 꺼지고 연기 대신 따뜻한 빛이 잦아든다
+  let blowT = 0;
+  function setCandles(lit) {
+    candlesLit = lit;
+    blowT = lit ? 0 : 1;
+    if (lit) for (const f of flames) f.visible = true;
+  }
+
+  function update(t, dt = 0.016) {
+    if (!candlesLit) {
+      blowT = Math.max(0, blowT - dt * 1.5);
+      for (const f of flames) { f.scale.setScalar(Math.max(0.001, blowT)); f.visible = blowT > 0.01; }
+      candleLight.intensity = 3.4 * blowT;
+    } else {
+      for (const f of flames) f.scale.set(1 + Math.sin(t * 17 + f.position.x * 40) * 0.12, 1.6 + Math.sin(t * 23 + f.position.z * 30) * 0.25, 1);
+      candleLight.intensity = 3.4 + Math.sin(t * 13) * 0.4 + Math.sin(t * 29) * 0.25;
+    }
     for (const b of balloons) {
       const ph = b.userData.phase;
       b.position.y = b.userData.base.y + Math.sin(t * 1.1 + ph) * 0.12;
@@ -286,5 +301,5 @@ export function buildWorld(scene) {
     }
   }
 
-  return { bulbs, lanternSlots, obstacles, floor, hemi, update, PALETTE };
+  return { bulbs, lanternSlots, obstacles, floor, hemi, update, setCandles, PALETTE, cakeTop: new THREE.Vector3(0, 1.9, 0) };
 }

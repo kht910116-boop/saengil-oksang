@@ -73,7 +73,7 @@ export function validateName(input, { max = 10 } = {}) {
 
 // 옥상 선물: 친구가 사서 옥상에 보이게 하는 디지털 선물(현금으로 바꿔주지 않음)
 export const GIFT_ITEMS = {
-  fireworks: { name: '자정 불꽃놀이', price: 3000, limit: 20, desc: '점등 순간 옥상 위로 불꽃이 터져요. 점등이 지났다면 바로 터져요.' },
+  fireworks: { name: '불꽃놀이', price: 3000, limit: 20, desc: '점등 순간 옥상 위로 불꽃이 터져요. 점등이 지났다면 바로 터져요.' },
   balloons: { name: '풍선 묶음', price: 2000, limit: 30, desc: '옥상에 풍선 묶음이 하나 더 떠올라요.' },
   topping: { name: '케이크 토핑', price: 1000, limit: 24, desc: '케이크 위에 딸기가 하나 올라가요.' },
 };
@@ -115,4 +115,16 @@ export function nextReveal(month, day, hour = 0, now = Date.now()) {
   const dayStart = (y) => Date.UTC(y, month - 1, month === 2 && day === 29 && !leap(y) ? 28 : day) - KST;
   if (dayStart(year) + 86400_000 <= now) year += 1;
   return dayStart(year) + hour * 3600_000;
+}
+
+// 하루짜리 옥상: 생일 다음 날 0시 5분에 닫히고 데이터를 지운다
+export const CLOSE_AFTER_MIDNIGHT_MS = 5 * 60_000;
+export const MAX_ROOFTOPS_PER_DAY = 300; // 하루에 새로 만들 수 있는 옥상 수(한국 시간 기준)
+export const MAX_DAYS_AHEAD = 60; // 생일 60일 전부터 만들 수 있다
+// 공개 시각이 속한 날(한국 시간)의 다음 날 0시 5분
+export function closeAt(igniteAt) {
+  const KST = 9 * 3600_000;
+  const d = new Date(igniteAt + KST);
+  const dayStart = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - KST;
+  return dayStart + 86400_000 + CLOSE_AFTER_MIDNIGHT_MS;
 }
