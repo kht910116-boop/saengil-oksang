@@ -44,7 +44,7 @@ ADMIN_KEY=비밀키 npm start  # http://localhost:8787
 - 호스팅 업체가 정해지면 `public/privacy.html`의 "처리 위탁" 항목에 업체명을 적어야 합니다.
 
 ## BGM
-`BGM_GUIDE.md`를 보고 만든 mp3를 `public/audio/`에 넣으면 됩니다(bgm-rooftop / bgm-door / bgm-midnight).
+`public/audio/`에 상황별 곡 3개(bgm-rooftop / bgm-door / bgm-midnight)가 들어 있습니다. 소리를 켠 사람만 내려받습니다. 곡 출처와 손질 내용, 새 곡 만드는 법은 `BGM_GUIDE.md`.
 
 ## 구조
 - `server/index.js` — HTTP·WebSocket 서버, SQLite 저장, 미리보기·운영자 화면
