@@ -88,3 +88,31 @@ export function josa(word, pair) {
   const [withB, withoutB] = pair === '이가' ? ['이', '가'] : pair === '을를' ? ['을', '를'] : pair === '와과' ? ['과', '와'] : ['은', '는'];
   return w + (has ? withB : withoutB);
 }
+
+// 등불 개인화(자유 입력 없이 고르기만)
+export const LANTERN_RELATIONS = ['친구', '가족', '연인', '동료', '선후배', '비밀'];
+export const MAX_YEARS = 40; // 알고 지낸 햇수(0은 '모름')
+// 주인공 답례 문구
+export const THANKS_TEMPLATES = ['다들 정말 고마워!', '최고의 생일이었어', '덕분에 행복한 하루야', '사랑해 친구들', '내년에도 같이 불 켜자'];
+// 공동 목표: 등불이 이만큼 모이면 점등 때 유성우
+export const GOAL_LANTERNS = 20;
+
+// 공개 시각 표시: 0시는 '자정', 나머지는 '오후 9시'처럼
+export function revealLabel(ms, { withDate = true } = {}) {
+  const d = new Date(ms + 9 * 3600_000);
+  const h = d.getUTCHours();
+  const mi = d.getUTCMinutes();
+  const time = h === 0 && mi === 0 ? '자정' : `${h < 12 ? '오전' : '오후'} ${h % 12 === 0 ? 12 : h % 12}시${mi ? ` ${mi}분` : ''}`;
+  return withDate ? `${d.getUTCMonth() + 1}월 ${d.getUTCDate()}일 ${time}` : time;
+}
+
+// 생일(월/일)과 공개 시각(0~23시) → 다음 공개 시각(한국 시간). 생일 당일 하루 동안은 그 해로 본다.
+export function nextReveal(month, day, hour = 0, now = Date.now()) {
+  const KST = 9 * 3600_000;
+  let year = new Date(now + KST).getUTCFullYear();
+  // 2월 29일 생일은 평년에 2월 28일로(그대로 두면 3월 1일로 넘어간다)
+  const leap = (y) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  const dayStart = (y) => Date.UTC(y, month - 1, month === 2 && day === 29 && !leap(y) ? 28 : day) - KST;
+  if (dayStart(year) + 86400_000 <= now) year += 1;
+  return dayStart(year) + hour * 3600_000;
+}
