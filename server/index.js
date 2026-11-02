@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { WebSocketServer } from 'ws';
-import { SERVICE_NAME, MAX_LANTERNS, OWNER_EARLY_MS, RETENTION_DAYS, REPORT_HIDE_THRESHOLD, renderTemplate, looksPersonal } from '../src/config.js';
+import { SERVICE_NAME, MAX_LANTERNS, OWNER_EARLY_MS, RETENTION_DAYS, REPORT_HIDE_THRESHOLD, renderTemplate, validateName, GIFT_ITEMS, PAYMENT_MODE } from '../src/config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -40,6 +40,20 @@ db.exec(`
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS lanterns_room ON lanterns(rooftop_id);
+  CREATE TABLE IF NOT EXISTS gifts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rooftop_id TEXT NOT NULL,
+    item TEXT NOT NULL,
+    name TEXT NOT NULL,
+    anonymous INTEGER NOT NULL DEFAULT 0,
+    color INTEGER NOT NULL,
+    x REAL NOT NULL,
+    z REAL NOT NULL,
+    price INTEGER NOT NULL,
+    payment TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS gifts_room ON gifts(rooftop_id);
   CREATE TABLE IF NOT EXISTS lantern_reports (
     lantern_id INTEGER NOT NULL,
     reporter TEXT NOT NULL,
@@ -74,16 +88,14 @@ const q = {
                         FROM lanterns l JOIN rooftops r ON r.id = l.rooftop_id
                         WHERE l.reports > 0 ORDER BY l.hidden ASC, l.reports DESC, l.id DESC LIMIT 200`),
   expired: db.prepare('SELECT id FROM rooftops WHERE ignite_at < ?'),
+  gifts: db.prepare('SELECT id, item, name, anonymous, color, x, z, created_at FROM gifts WHERE rooftop_id = ? ORDER BY id'),
+  countGifts: db.prepare('SELECT item, COUNT(*) AS n FROM gifts WHERE rooftop_id = ? GROUP BY item'),
+  insertGift: db.prepare('INSERT INTO gifts (rooftop_id, item, name, anonymous, color, x, z, price, payment, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+  deleteRoofGifts: db.prepare('DELETE FROM gifts WHERE rooftop_id = ?'),
   deleteReportsOfRoof: db.prepare('DELETE FROM lantern_reports WHERE lantern_id IN (SELECT id FROM lanterns WHERE rooftop_id = ?)'),
 };
 
 // ── 입력 검사 ──
-// 기본 욕설 필터: 공백·기호·숫자를 지운 뒤 대표적인 욕설이 들어 있으면 막는다(완벽하지 않으므로 신고·숨김 기능과 함께 쓴다)
-const BAD_WORDS = ['씨발', '시발', '씨바', '시바', '쓰발', 'ㅅㅂ', 'ㅆㅂ', '병신', '븅신', 'ㅂㅅ', '개새', '새끼', 'ㅅㄲ', '좆', '존나', 'ㅈㄴ', '지랄', 'ㅈㄹ', '미친놈', '미친년', '닥쳐', '꺼져', '엿먹', '니애미', '느금', '애미', '애비', 'fuck', 'shit', 'bitch'];
-export function hasBadWord(text) {
-  const t = String(text).toLowerCase().replace(/[\s\d~`!@#$%^&*()_+\-=\[\]{}|\\;:'",.<>/?·ㆍ…]/g, '');
-  return BAD_WORDS.some((w) => t.includes(w));
-}
 const COLORS = new Set([0xffc46b, 0xf29bb3, 0x8fd3c1, 0xb9a6f2, 0xfbf4e8]);
 
 // 생일(월/일) → 다음 자정(한국 시간)의 시각. 생일 당일 하루 동안은 이미 켜진 옥상으로 본다.
@@ -146,8 +158,14 @@ function roleOf(roof, params) {
 }
 const doorOpen = (roof) => Date.now() >= roof.ignite_at - OWNER_EARLY_MS;
 
+// 익명 선물은 보낸 사람 이름을 밖으로 내보내지 않는다(만든 사람·주인공에게도)
+const giftView = (g) => ({ id: g.id, item: g.item, name: g.anonymous ? '' : g.name, anonymous: !!g.anonymous, color: g.color, x: g.x, z: g.z });
+
 function roofView(roof, role) {
-  const body = { id: roof.id, owner: roof.owner, igniteAt: roof.ignite_at, now: Date.now(), role, maxLanterns: MAX_LANTERNS };
+  const body = { id: roof.id, owner: roof.owner, igniteAt: roof.ignite_at, now: Date.now(), role, maxLanterns: MAX_LANTERNS, paymentMode: PAYMENT_MODE };
+  const gifts = q.gifts.all(roof.id);
+  if (role === 'owner' && !doorOpen(roof)) { body.gifts = []; body.giftCount = gifts.length; }
+  else body.gifts = gifts.map(giftView);
   if (role === 'host') {
     body.lanterns = q.allLanterns.all(roof.id);
     body.ownerKey = roof.owner_key;
@@ -249,6 +267,7 @@ function adminPage(res, key, notice = '') {
 }
 
 function deleteRoof(roofId) {
+  q.deleteRoofGifts.run(roofId);
   q.deleteReportsOfRoof.run(roofId);
   q.deleteRoofLanterns.run(roofId);
   q.deleteRoof.run(roofId);
@@ -264,18 +283,18 @@ function setLanternHidden(roofId, lanternId, hidden) {
 // ── HTTP ──
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
-  const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
+  // 프록시(Cloudflare 등) 뒤에 둘 때만 전달된 IP를 믿는다. 아니면 위조할 수 있다.
+  const ip = (process.env.TRUST_PROXY === '1' && req.headers['x-forwarded-for']?.split(',')[0].trim()) || req.socket.remoteAddress;
   try {
     // 옥상 만들기
     if (req.method === 'POST' && url.pathname === '/api/rooftops') {
       if (limited(ip, 'create', 10, 3600_000)) return json(res, 429, { error: '잠시 후 다시 만들어주세요.' });
       const b = await readBody(req);
-      const owner = clean(b.owner, 10);
+      const ownerCheck = validateName(b.owner);
+      if (!ownerCheck.ok) return json(res, 400, { error: `주인공 ${ownerCheck.error}` });
+      const owner = ownerCheck.value;
       const month = Number(b.month);
       const day = Number(b.day);
-      if (!owner) return json(res, 400, { error: '주인공 이름을 적어주세요.' });
-      if (hasBadWord(owner)) return json(res, 400, { error: '주인공 이름을 다시 적어주세요.' });
-      if (looksPersonal(owner)) return json(res, 400, { error: '이름에는 연락처나 주소를 적을 수 없어요.' });
       const maxDay = new Date(Date.UTC(2024, month, 0)).getUTCDate(); // 윤년 기준(2월 29일 허용)
       if (!(month >= 1 && month <= 12 && day >= 1 && day <= maxDay)) return json(res, 400, { error: '생일 날짜를 확인해주세요.' });
       const test = Number(b.testSeconds);
@@ -283,6 +302,34 @@ const server = http.createServer(async (req, res) => {
       const id = crypto.randomBytes(5).toString('base64url');
       q.insertRoof.run(id, owner, igniteAt, crypto.randomBytes(9).toString('base64url'), crypto.randomBytes(9).toString('base64url'), Date.now());
       return json(res, 201, roofView(q.getRoof.get(id), 'host'));
+    }
+
+    // 옥상 선물 보내기
+    const gm = url.pathname.match(/^\/api\/rooftops\/([\w-]{4,16})\/gifts$/);
+    if (gm && req.method === 'POST') {
+      const roof = q.getRoof.get(gm[1]);
+      if (!roof) return json(res, 404, { error: '옥상을 찾을 수 없어요. 링크를 다시 확인해주세요.' });
+      if (limited(ip, 'gift', 10, 600_000)) return json(res, 429, { error: '선물은 10분에 10개까지 보낼 수 있어요. 잠시 후 다시 보내주세요.' });
+      const b = await readBody(req);
+      const item = GIFT_ITEMS[b.item] ? b.item : null;
+      const anonymous = !!b.anonymous;
+      const nameCheck = anonymous ? { ok: true, value: '' } : validateName(b.name);
+      const name = nameCheck.value;
+      const color = Number(b.color);
+      if (!item) return json(res, 400, { error: '선물을 다시 골라주세요.' });
+      if (!nameCheck.ok) return json(res, 400, { error: `${nameCheck.error} 이름 없이 보내려면 익명으로 보내기를 골라주세요.` });
+      if (!COLORS.has(color)) return json(res, 400, { error: '색을 다시 골라주세요.' });
+      const used = q.countGifts.all(roof.id).find((r) => r.item === item)?.n || 0;
+      if (used >= GIFT_ITEMS[item].limit) return json(res, 409, { error: `이 옥상에는 ${GIFT_ITEMS[item].name}이(가) 가득 찼어요.` });
+      // 결제 확인: 지금은 무료. 유료로 바꾸면 여기서 결제 승인 여부를 확인한다.
+      if (PAYMENT_MODE !== 'free') return json(res, 503, { error: '결제를 준비하고 있어요.' });
+      const x = clampNum(b.x, -11, 11);
+      const z = clampNum(b.z, -8, 8);
+      // 익명이면 이름을 아예 저장하지 않는다
+      const r = q.insertGift.run(roof.id, item, anonymous ? '' : name, anonymous ? 1 : 0, color, x, z, 0, 'free', Date.now());
+      const gift = giftView({ id: Number(r.lastInsertRowid), item, name: anonymous ? '' : name, anonymous, color, x, z });
+      broadcast(roof.id, { t: 'gift', gift: { ...gift, by: clean(b.peerId, 12) } });
+      return json(res, 201, gift);
     }
 
     const m = url.pathname.match(/^\/api\/rooftops\/([\w-]{4,16})(?:\/lanterns(?:\/(\d+)\/(hide|show|report))?)?$/);
@@ -305,15 +352,14 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'POST' && isLanternPath && !m[2]) {
         if (limited(ip, 'lantern', 20, 600_000)) return json(res, 429, { error: '등불은 조금 천천히 달아주세요.' });
         const b = await readBody(req);
-        const name = clean(b.name, 10);
+        const nameCheck = validateName(b.name);
+        if (!nameCheck.ok) return json(res, 400, { error: nameCheck.error });
+        const name = nameCheck.value;
         // 문구는 직접 받지 않고 준비된 문구의 번호만 받는다
         const msg = Number.isInteger(b.tpl) ? renderTemplate(b.tpl, roof.owner) : null;
         const color = Number(b.color);
-        if (!name) return json(res, 400, { error: '이름을 적어주세요.' });
         if (!msg) return json(res, 400, { error: '등불에 담을 문구를 골라주세요.' });
         if (!COLORS.has(color)) return json(res, 400, { error: '등불 색을 다시 골라주세요.' });
-        if (hasBadWord(name)) return json(res, 400, { error: '이름을 다시 적어주세요.' });
-        if (looksPersonal(name)) return json(res, 400, { error: '이름에는 연락처나 주소를 적을 수 없어요.' });
         const { n, total } = q.nextSlot.get(roof.id);
         if (total >= MAX_LANTERNS) return json(res, 409, { error: '이 옥상의 전구 줄이 가득 찼어요.' });
         const r = q.insertLantern.run(roof.id, name, msg, color, n, Date.now());
@@ -399,8 +445,8 @@ server.on('upgrade', (req, socket, head) => {
       try { msg = JSON.parse(raw); } catch { return; }
       if (msg.t === 'join' && !peer.joined) {
         peer.joined = true;
-        peer.name = isOwner ? roof.owner : clean(msg.name, 10) || '친구';
-        if (hasBadWord(peer.name) || looksPersonal(peer.name)) peer.name = '친구';
+        const nc = validateName(msg.name);
+        peer.name = isOwner ? roof.owner : nc.ok ? nc.value : '친구';
         peer.color = COLORS.has(Number(msg.color)) ? Number(msg.color) : 0xf29bb3;
         peer.hat = Math.abs(Number(msg.hat) || 0) % 4;
         const others = [...room.values()].filter((p) => p.joined && p.id !== peer.id).map(view);

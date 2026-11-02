@@ -39,7 +39,52 @@ export function renderTemplate(index, owner) {
   return t ? t.replace('{부름}', callName(owner)) : null;
 }
 
-// 이름에 연락처·이메일 같은 개인정보가 들어가지 않게
-export function looksPersonal(text) {
-  return /\d{4,}|@|https?:|www\.|\.com|\.kr/i.test(String(text).replace(/[\s-]/g, ''));
+// ── 이름 필터 ──
+// 1) 허용 목록: 한글 완성형 글자와 영어, 띄어쓰기만. 숫자·기호·자음/모음만 쓴 글자·이모지는 전부 막는다.
+// 2) 욕설(변형·영타 포함), 3) 연락처·계정·주소 단어, 4) 한글로 쓴 숫자 4자 이상, 5) 운영자 사칭을 막는다.
+const BAD_WORDS = [
+  '씨발', '시발', '씨바', '시바', '씨빨', '씨팔', '시팔', '쉬발', '쓰발', '쓰벌', '씹', '좆', '좃', '존나', '졸라', '병신', '븅신', '빙신', '병싄',
+  '개새', '개색', '개쉐', '개세', '새끼', '쌍년', '쌍놈', '썅', '지랄', '미친놈', '미친년', '미친새', '닥쳐', '꺼져', '엿먹', '니미', '니애미', '느금', '애미', '애비', '엠창',
+  '섹스', '야동', '자지', '보지', '창녀', '걸레', '한남', '한녀', '틀딱', '급식충', '맘충',
+  'fuck', 'fuk', 'shit', 'bitch', 'sex', 'porn', 'dick', 'pussy', 'asshole', 'nigg',
+  'tlqkf', 'tlqk', 'qudtls', 'whssk', 'wlfkf', 'rotoRl', 'rotor', 'ssibal', 'sibal', 'byungsin',
+];
+const PERSONAL_KO = ['카톡', '카카오', '아이디', '인스타', '디엠', '전화', '연락', '번호', '핸드폰', '휴대폰', '폰번', '주소', '계좌', '은행', '텔레', '오픈채팅', '오픈톡', '오카', '메일', '지메일', '네이버', '닷컴', '점컴', '골뱅이', '유튜브', '틱톡', '트위터', '페북', '디스코드', '라인아이디'];
+// 짧은 영어 단어는 이름 속 글자와 겹치지 않게 단어 단위로, 긴 단어는 붙여 써도 잡는다
+const PERSONAL_EN_WORD = /\b(id|ig|dm|tel|line|mail|com|net|kr|fb|phone|call|dial)\b/i;
+const PERSONAL_EN_ANY = ['kakao', 'katalk', 'kakaotalk', 'insta', 'telegram', 'gmail', 'naver', 'daum', 'hanmail', 'http', 'www', 'youtube', 'tiktok', 'twitter', 'facebook', 'discord', 'openchat', 'snapchat'];
+const NUM_WORDS = /[영공일이삼사오육륙칠팔구]{4,}/;
+const IMPERSONATE = ['운영자', '관리자', '운영진', '공식', 'admin', 'official', 'staff'];
+
+export function validateName(input, { max = 10 } = {}) {
+  const value = String(input ?? '').replace(/\s+/g, ' ').trim();
+  if (!value) return { ok: false, error: '이름을 적어주세요.' };
+  if (value.length > max) return { ok: false, error: `이름은 ${max}자까지 적을 수 있어요.` };
+  if (!/^[가-힣A-Za-z ]+$/.test(value)) return { ok: false, error: '이름은 한글이나 영어로만 적어주세요. 숫자, 기호, 자음만 쓴 글자는 쓸 수 없어요.' };
+  const flat = value.replace(/ /g, '').toLowerCase();
+  const squeezed = flat.replace(/(.)\1+/g, '$1'); // fuuuck → fuck, 씨이이발 같은 반복 변형 대비
+  if (BAD_WORDS.some((w) => flat.includes(w.toLowerCase()) || squeezed.includes(w.toLowerCase()))) return { ok: false, error: '다른 이름으로 적어주세요.' };
+  if (PERSONAL_KO.some((w) => flat.includes(w)) || PERSONAL_EN_ANY.some((w) => flat.includes(w)) || PERSONAL_EN_WORD.test(value) || NUM_WORDS.test(flat)) {
+    return { ok: false, error: '이름에는 연락처, 계정, 주소 같은 개인정보를 적을 수 없어요.' };
+  }
+  if (IMPERSONATE.some((w) => flat.includes(w))) return { ok: false, error: '운영자로 오해할 수 있는 이름은 쓸 수 없어요.' };
+  return { ok: true, value };
+}
+
+// 옥상 선물: 친구가 사서 옥상에 보이게 하는 디지털 선물(현금으로 바꿔주지 않음)
+export const GIFT_ITEMS = {
+  fireworks: { name: '자정 불꽃놀이', price: 3000, limit: 20, desc: '점등 순간 옥상 위로 불꽃이 터져요. 점등이 지났다면 바로 터져요.' },
+  balloons: { name: '풍선 묶음', price: 2000, limit: 30, desc: '옥상에 풍선 묶음이 하나 더 떠올라요.' },
+  topping: { name: '케이크 토핑', price: 1000, limit: 24, desc: '케이크 위에 딸기가 하나 올라가요.' },
+};
+// 결제 방식: 'free'면 모든 선물이 무료. 나중에 유료로 바꿀 때 서버의 결제 확인 부분만 바꾼다.
+export const PAYMENT_MODE = 'free';
+
+// 받침에 맞는 조사: josa('도윤', '이가') → '도윤이', josa('토핑', '을를') → '토핑을'
+export function josa(word, pair) {
+  const w = String(word);
+  const code = w.charCodeAt(w.length - 1) - 0xac00;
+  const has = code >= 0 && code <= 11171 ? code % 28 !== 0 : false;
+  const [withB, withoutB] = pair === '이가' ? ['이', '가'] : pair === '을를' ? ['을', '를'] : pair === '와과' ? ['과', '와'] : ['은', '는'];
+  return w + (has ? withB : withoutB);
 }

@@ -134,6 +134,12 @@ export const sound = {
     }
     return sound._dest.stream;
   },
+  pop() {
+    if (!on) return;
+    const t = ctx.currentTime;
+    tone(220, t, 0.25, { type: 'sine', gain: 0.12 });
+    [1568, 2093, 2637].forEach((f, i) => tone(f, t + 0.05 + i * 0.04, 0.6, { type: 'triangle', gain: 0.03 }));
+  },
   chime() {
     if (!on) return;
     const t = ctx.currentTime;
