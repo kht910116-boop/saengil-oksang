@@ -14,7 +14,8 @@ import './style.css';
 // ── 경로: / 옥상 만들기 · /r/demo 샘플 · /r/:id 실제 옥상 ──
 const path = location.pathname;
 const roomMatch = path.match(/^\/r\/([\w-]{4,16})\/?$/);
-const MODE = path === '/' || path === '/index.html' ? 'landing' : roomMatch?.[1] === 'demo' ? 'demo' : roomMatch ? 'room' : 'landing';
+// 서버 없이 띄우는 미리보기 페이지는 window.__FORCE_MODE = 'demo' 로 샘플 옥상만 연다
+const MODE = window.__FORCE_MODE || (path === '/' || path === '/index.html' ? 'landing' : roomMatch?.[1] === 'demo' ? 'demo' : roomMatch ? 'room' : 'landing');
 const ROOM_ID = MODE === 'room' ? roomMatch[1] : null;
 const QS = new URLSearchParams(location.search);
 const OWNER_KEY = QS.get('k');
