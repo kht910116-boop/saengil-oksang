@@ -1,0 +1,10 @@
+{
+  "name": "생일 옥상",
+  "short_name": "생일 옥상",
+  "description": "친구 생일에 등불을 달아주는 밤 옥상",
+  "lang": "ko",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1f2547",
+  "theme_color": "#1f2547"
+}
