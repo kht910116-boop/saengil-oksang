@@ -238,3 +238,68 @@ test('측정·통계·백업: 운영자 키가 있어야 열림', async () => {
   assert.ok((await bk.arrayBuffer()).byteLength > 1000);
   assert.equal((await fetch(`${BASE}/healthz`)).status, 200);
 });
+
+// 사흘 뒤 생일(시험용이 아닌 진짜 파티장: 목록에는 시험용 파티장이 나오지 않는다)
+const soon = () => { const d = new Date(Date.now() + 3 * 86400_000 + 9 * 3600_000); return { month: d.getUTCMonth() + 1, day: d.getUTCDate(), hour: 21 }; };
+
+test('파티장 목록: 공개한 진짜 파티장만, 관리자가 공개를 끄고 켬', async () => {
+  const pub = await call('POST', '/api/rooftops', { owner: '하은', ...soon() });
+  assert.equal(pub.status, 201, JSON.stringify(pub.data));
+  assert.equal(pub.data.listed, true);
+  const priv = await call('POST', '/api/rooftops', { owner: '서준', ...soon(), listed: false });
+  const test1 = await create({ owner: '시험' });
+  let list = (await call('GET', '/api/rooftops')).data.rooms;
+  const mine = list.find((r) => r.id === pub.data.id);
+  assert.ok(mine, '공개 파티장이 목록에 있어야 함');
+  assert.equal(mine.owner, '하은');
+  assert.equal(mine.online, 0);
+  assert.equal(mine.cap, 40);
+  assert.ok(!('ownerKey' in mine) && !('hostKey' in mine), '목록에 열쇠가 나가면 안 됨');
+  assert.ok(!list.some((r) => r.id === priv.data.id), '비공개는 목록에 없음');
+  assert.ok(!list.some((r) => r.id === test1.data.id), '시험용은 목록에 없음');
+  // 공개 끄기: 친구는 못 하고, 만든 사람은 할 수 있음
+  assert.equal((await call('POST', `/api/rooftops/${pub.data.id}/listing`, { listed: false })).status, 403);
+  assert.equal((await call('POST', `/api/rooftops/${pub.data.id}/listing`, { h: pub.data.hostKey, listed: false })).status, 200);
+  list = (await call('GET', '/api/rooftops')).data.rooms;
+  assert.ok(!list.some((r) => r.id === pub.data.id));
+  await call('POST', `/api/rooftops/${priv.data.id}/listing`, { h: priv.data.hostKey, listed: true });
+  list = (await call('GET', '/api/rooftops')).data.rooms;
+  assert.ok(list.some((r) => r.id === priv.data.id));
+});
+
+test('내 생일 직접 열기: 주인공이 바로 들어가고 관리도 함', async () => {
+  const r = await call('POST', '/api/rooftops', { owner: '지우', ...soon(), self: true });
+  assert.equal(r.status, 201);
+  const asOwner = (await call('GET', `/api/rooftops/${r.data.id}?k=${r.data.ownerKey}`)).data;
+  assert.equal(asOwner.role, 'owner');
+  assert.equal(asOwner.self, true);
+  assert.equal(asOwner.canManage, true);
+  assert.ok(Array.isArray(asOwner.lanterns) && asOwner.lanternCount === undefined, '문 앞 대기 없이 등불이 보임');
+  // 점등 전이어도 실시간 연결이 열림(깜짝 파티 주인공은 4001로 막힘)
+  const ws = new WebSocket(`ws://localhost:${PORT}/ws?room=${r.data.id}&k=${r.data.ownerKey}`);
+  const closed = await new Promise((res) => { ws.on('open', () => { ws.close(); res('open'); }); ws.on('close', (c) => res(c)); });
+  assert.equal(closed, 'open');
+  // 깜짝 파티 주인공은 관리 권한이 없음
+  const s = await create();
+  const sOwner = (await call('GET', `/api/rooftops/${s.data.id}?k=${s.data.ownerKey}`)).data;
+  assert.equal(sOwner.canManage, false);
+  assert.equal((await call('POST', `/api/rooftops/${s.data.id}/bots`, { k: s.data.ownerKey, count: 3 })).status, 403);
+});
+
+test('가상 응원단: 연 사람만, 한 명당 등불 하나, 최대 20명', async () => {
+  const r = await create();
+  const id = r.data.id;
+  assert.equal((await call('POST', `/api/rooftops/${id}/bots`, { count: 5 })).status, 403, '친구는 못 보냄');
+  const a = await call('POST', `/api/rooftops/${id}/bots`, { h: r.data.hostKey, count: 5 });
+  assert.equal(a.status, 201);
+  assert.equal(a.data.bots.length, 5);
+  assert.ok(a.data.bots.every((b) => b.name.startsWith('응원단 ')), '이름으로 진짜 친구와 구분');
+  const view = (await call('GET', `/api/rooftops/${id}`)).data;
+  assert.equal(view.bots.length, 5);
+  assert.equal(view.lanterns.filter((l) => l.name.startsWith('응원단 ')).length, 5, '응원단 등불 5개');
+  await call('POST', `/api/rooftops/${id}/bots`, { h: r.data.hostKey, count: 10 });
+  const c = await call('POST', `/api/rooftops/${id}/bots`, { h: r.data.hostKey, count: 10 });
+  assert.equal(c.data.bots.length, 20, '20명에서 멈춤');
+  assert.equal(new Set(c.data.bots.map((b) => b.name)).size, 20, '이름이 겹치지 않음');
+  assert.equal((await call('POST', `/api/rooftops/${id}/bots`, { h: r.data.hostKey, count: 1 })).status, 409);
+});

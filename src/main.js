@@ -16,7 +16,7 @@ import { createRecorder, saveVideo, calendarFile } from './recorder.js';
 // 화면 오류는 운영자가 볼 수 있게 서버에 남긴다
 window.addEventListener('error', (e) => reportError(`${e.message} @${(e.filename || '').split('/').pop()}:${e.lineno}`));
 window.addEventListener('unhandledrejection', (e) => reportError(`promise: ${e.reason?.message || e.reason}`));
-import { LANTERN_TEMPLATES, renderTemplate, GIFT_ITEMS, PAYMENT_MODE, josa, validateName, revealLabel, LANTERN_RELATIONS, MAX_YEARS, THANKS_TEMPLATES, GOAL_LANTERNS, VENUES, DEFAULT_VENUE, BRAND, OUTFITS, DEFAULT_OUTFIT, ACCESSORIES } from './config.js';
+import { LANTERN_TEMPLATES, renderTemplate, GIFT_ITEMS, PAYMENT_MODE, josa, validateName, revealLabel, LANTERN_RELATIONS, MAX_YEARS, THANKS_TEMPLATES, GOAL_LANTERNS, VENUES, DEFAULT_VENUE, BRAND, OUTFITS, DEFAULT_OUTFIT, ACCESSORIES, MAX_BOTS } from './config.js';
 import { createGiftLayer } from './gifts.js';
 import { composeMemoryCard } from './memory.js';
 import { songLines, BEAT, LEAD_IN, SONG_BEATS } from './song.js';
@@ -29,7 +29,7 @@ const roomMatch = path.match(/^\/r\/([\w-]{4,16})\/?$/);
 const MODE = window.__FORCE_MODE || (path === '/' || path === '/index.html' ? 'landing' : roomMatch?.[1] === 'demo' ? 'demo' : roomMatch ? 'room' : 'landing');
 const ROOM_ID = MODE === 'room' ? roomMatch[1] : null;
 const QS = new URLSearchParams(location.search);
-const OWNER_KEY = QS.get('k');
+let OWNER_KEY = QS.get('k');
 document.body.dataset.mode = MODE;
 
 const KST = 9 * 3600_000;
@@ -51,7 +51,7 @@ const DEMO_FRIENDS = [
 ];
 
 // 파티장 상태
-const ROOF_STATE = { owner: '민지', igniteAt: Date.now() + 3 * 86400_000, endAt: 0, isOwner: false, role: 'friend', hidden: [], thanks: null, candlesOut: false, spectator: false };
+const ROOF_STATE = { owner: '민지', igniteAt: Date.now() + 3 * 86400_000, endAt: 0, isOwner: false, role: 'friend', hidden: [], thanks: null, candlesOut: false, spectator: false, self: false, canManage: false, listed: false, bots: 0, humans: null };
 let serverOffset = 0;
 const serverNow = () => Date.now() + serverOffset;
 
@@ -62,6 +62,8 @@ const store = {
 
 // 파티장을 만든 사람의 관리 키: 링크(?h=)로 오거나, 만든 기기에 저장돼 있다
 let HOST_KEY = QS.get('h') || (ROOM_ID ? store.get(`host:${ROOM_ID}`) : null);
+// 내 생일 파티를 직접 연 사람은 목록에서 들어와도 주인공으로(이 기기에 저장된 입장 키)
+if (!OWNER_KEY && ROOM_ID) OWNER_KEY = store.get(`owner:${ROOM_ID}`) || null;
 if (QS.get('h') && ROOM_ID) store.set(`host:${ROOM_ID}`, QS.get('h'));
 function authQuery() {
   const p = new URLSearchParams();
@@ -788,7 +790,7 @@ soundBtn.addEventListener('click', async () => {
 const bubble = document.querySelector('#bubble');
 let bubbleFor = null;
 let bubbleY = 0.45;
-const canHide = () => ROOF_STATE.role === 'host' || (ROOF_STATE.role === 'owner' && serverNow() >= ROOF_STATE.igniteAt - 15_000);
+const canHide = () => ROOF_STATE.canManage || (ROOF_STATE.role === 'owner' && serverNow() >= ROOF_STATE.igniteAt - 15_000);
 function showGift(group) {
   const g = group.userData.gift;
   bubbleFor = { mesh: group };
@@ -1061,6 +1063,27 @@ function placeTopButton(btn) {
   if (wrap) right.insertBefore(btn, wrap); else right.appendChild(btn);
 }
 
+// ── 가상 응원단: 파티장을 연 사람이 보낸 가상 친구. 모두의 화면에서 돌아다니고 점등식·단체 사진에도 함께한다 ──
+const botIds = new Set();
+function addBots(list) {
+  for (const b of list) {
+    if (botIds.has(b.id)) continue;
+    botIds.add(b.id);
+    const a = Math.random() * Math.PI * 2;
+    const r = 2.5 + Math.random() * 4;
+    const p = addPerson({ name: b.name, color: b.color, hatColor: HAT_COLORS[(b.hat || 0) % 4], outfit: b.outfit, acc: b.acc }, new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r), { npc: true });
+    p.bot = true;
+    p.label.classList.add('is-bot');
+    p.wait = Math.random() * 3;
+  }
+  ROOF_STATE.bots = botIds.size;
+  renderCount();
+}
+function renderCount() {
+  if (MODE !== 'room' || ROOF_STATE.humans == null) return;
+  countEl.textContent = `함께 있는 친구 ${ROOF_STATE.humans}명${ROOF_STATE.bots ? ` · 응원단 ${ROOF_STATE.bots}` : ''}${ROOF_STATE.watching ? ` · 구경 ${ROOF_STATE.watching}명` : ''}`;
+}
+
 // ── 만든 사람의 관리 화면 ──
 function addManageButton() {
   if (document.querySelector('#btn-manage')) return;
@@ -1106,16 +1129,24 @@ async function refreshBoard() {
 
 function openManage() {
   const base = `${location.origin}/r/${ROOM_ID}`;
-  const links = [
+  const links = ROOF_STATE.self ? [
+    ['manage-friend', '친구 초대 링크', base],
+    ['manage-owner', '내 입장 링크 (나만 보관)', `${base}?k=${ROOF_STATE.keys.ownerKey}`],
+  ] : [
     ['manage-friend', '친구 링크', base],
     ['manage-owner', `${ROOF_STATE.owner}에게 보낼 링크`, `${base}?k=${ROOF_STATE.keys.ownerKey}`],
     ['manage-host', '내 관리 링크', `${base}?h=${ROOF_STATE.keys.hostKey}`],
   ];
+  const botsLeft = MAX_BOTS - ROOF_STATE.bots;
   const hidden = ROOF_STATE.hidden;
   openSheet(`
     <h2>준비 현황 · 관리</h2>
-    <p class="sheet-lead">이 화면은 파티장을 만든 사람에게만 보여요.</p>
+    <p class="sheet-lead">이 화면은 파티장을 연 사람에게만 보여요.</p>
     <div class="board" aria-live="polite"><p class="sheet-lead">현황을 불러오는 중…</p></div>
+    <h3 class="sheet-sub">가상 응원단 보내기 <small>${ROOF_STATE.bots}/${MAX_BOTS}명</small></h3>
+    <p class="sheet-lead">${esc(ROOF_STATE.owner)}의 파티가 외롭지 않게 가상 친구를 보내요. 응원단은 파티장을 돌아다니고, 한 명마다 등불을 하나씩 달아요. 등불이 ${GOAL_LANTERNS}개 모이면 점등 때 모두가 유성우를 봐요. 이름 앞에 '응원단'이 붙어서 진짜 친구와 구분돼요.</p>
+    <div class="bot-row">${[3, 5, 10].map((n) => `<button type="button" class="btn" data-bots="${n}"${botsLeft <= 0 ? ' disabled' : ''}>+${Math.min(n, Math.max(botsLeft, 0)) || n}명</button>`).join('')}</div>
+    <label class="check list-toggle"><input type="checkbox" id="manage-listed"${ROOF_STATE.listed ? ' checked' : ''}> 파티장 목록에 보이기 <small>(누구나 첫 화면에서 골라 들어올 수 있어요)</small></label>
     ${links.map(([id, label, url]) => `
       <div class="link-card"><p class="link-title">${esc(label)}</p>
         <input id="${id}" readonly value="${esc(url)}"><button class="btn" data-copy="${id}">복사</button></div>`).join('')}
@@ -1127,6 +1158,25 @@ function openManage() {
     <button class="btn wide danger" id="delete-roof">이 파티장 지우기</button>
     <p class="form-error" role="alert"></p>`);
   refreshBoard();
+  sheetBody.querySelectorAll('[data-bots]').forEach((b) => b.addEventListener('click', async () => {
+    sheetBody.querySelectorAll('[data-bots]').forEach((x) => { x.disabled = true; });
+    try {
+      const r = await api(`/api/rooftops/${ROOM_ID}/bots`, { method: 'POST', body: { ...authBody(), count: Number(b.dataset.bots) } });
+      setStatus(`응원단이 왔어요! 지금 응원단 ${r.bots.length}명이 함께해요`);
+      track('bots_added');
+      closeSheet();
+    } catch (err) {
+      sheetBody.querySelector('.form-error').textContent = err.message;
+      sheetBody.querySelectorAll('[data-bots]').forEach((x) => { x.disabled = false; });
+    }
+  }));
+  sheetBody.querySelector('#manage-listed')?.addEventListener('change', async (e) => {
+    try {
+      const r = await api(`/api/rooftops/${ROOM_ID}/listing`, { method: 'POST', body: { ...authBody(), listed: e.target.checked } });
+      ROOF_STATE.listed = r.listed;
+      setStatus(r.listed ? '파티장 목록에 보여요' : '이제 링크로만 들어올 수 있어요');
+    } catch (err) { e.target.checked = !e.target.checked; sheetBody.querySelector('.form-error').textContent = err.message; }
+  });
   sheetBody.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => {
     const input = document.getElementById(b.dataset.copy);
     input.select();
@@ -2405,24 +2455,49 @@ async function startLanding() {
   const hourName = (h) => (h === 0 ? '자정 (0시)' : `${h < 12 ? '오전' : '오후'} ${h % 12 === 0 ? 12 : h % 12}시`);
   const hours = [0, ...Array.from({ length: 16 }, (_, i) => i + 8)].map((h) => `<option value="${h}">${hourName(h)}</option>`).join('');
   openSheet(`
-    <h2>생일 파티 열기</h2>
-    <p class="sheet-lead">친구들이 등불을 모으는 동안 주인공은 문밖에서 기다려요. 정한 시각이 되면 문이 열리고 모두의 화면에서 함께 불이 켜져요. 파티장은 생일 다음 날 0시 5분에 닫혀요.</p>
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="rooms" aria-selected="true">파티장 고르기</button>
+      <button type="button" role="tab" data-tab="create" aria-selected="false">새 파티 열기</button>
+    </div>
+    <section id="tab-rooms" role="tabpanel">
+      <div class="rooms-head"><p class="sheet-lead">지금 열려 있는 생일 파티예요. 들어가고 싶은 파티장을 골라주세요.</p><button type="button" class="link-btn" id="rooms-refresh">새로고침</button></div>
+      <div class="room-filter" role="group" aria-label="파티장 거르기">
+        <button type="button" data-filter="all" aria-pressed="true">전체</button><button type="button" data-filter="live" aria-pressed="false">지금 파티 중</button><button type="button" data-filter="soon" aria-pressed="false">곧 점등</button>
+      </div>
+      <ul class="room-list" aria-live="polite"><li class="room-empty">파티장 목록을 불러오는 중…</li></ul>
+      <button type="button" class="btn primary wide" id="go-create">+ 새 파티장 열기</button>
+      <a class="text-link" href="/r/demo">샘플 파티장 먼저 둘러보기</a>
+    </section>
+    <section id="tab-create" role="tabpanel" hidden>
+    <p class="sheet-lead">친구 생일을 몰래 준비하거나, 내 생일 파티를 직접 열 수 있어요. 정한 시각이 되면 모두의 화면에서 함께 불이 켜지고, 파티장은 생일 다음 날 0시 5분에 닫혀요.</p>
     <p class="capacity" role="status"></p>
     <form id="create-form">
-      <label class="field"><span>주인공 이름</span><input id="create-owner" name="owner" maxlength="10" required placeholder="예: 민지"></label>
+      <fieldset class="who-pick"><legend>누구의 파티인가요?</legend>
+        <label class="who"><input type="radio" name="who" value="friend" checked><span><b>친구 생일 · 깜짝 파티</b><small>주인공은 점등 전까지 문밖에서 기다려요</small></span></label>
+        <label class="who"><input type="radio" name="who" value="self"><span><b>내 생일 · 직접 열기</b><small>바로 들어가서 친구들을 맞이해요</small></span></label>
+      </fieldset>
+      <label class="field"><span class="owner-label">주인공 이름</span><input id="create-owner" name="owner" maxlength="10" required placeholder="예: 민지"></label>
       <div class="field-row">
         <label class="field"><span>생일 월</span><select id="create-month" name="month">${months}</select></label>
         <label class="field"><span>생일 일</span><select id="create-day" name="day">${days}</select></label>
       </div>
       ${venuePickerHtml(world.id)}
       <label class="field"><span>다 같이 불을 켤 시각 (생일 당일)</span><select id="create-hour" name="hour">${hours}</select><small class="field-hint">자정이 부담되면 생일 저녁처럼 모이기 쉬운 시간을 골라주세요.</small></label>
+      <label class="check"><input id="create-listed" type="checkbox" name="listed" checked> 파티장 목록에 보이기<small class="field-hint listed-hint">누구나 첫 화면에서 골라 들어올 수 있어요. 깜짝 파티라면 주인공도 목록에서 볼 수 있으니, 완전히 비밀로 하려면 꺼 주세요.</small></label>
       <label class="check"><input id="create-test" type="checkbox" name="test"> 시험해 보기: 1분 뒤에 바로 점등할게요</label>
       <p class="form-error" role="alert"></p>
       <button class="btn primary wide" type="submit">파티장 열기</button>
-      <a class="text-link" href="/r/demo">샘플 파티장 먼저 둘러보기</a>
-      <p class="legal-links"><a href="/privacy" target="_blank" rel="noopener">개인정보처리방침</a> · <a href="/terms" target="_blank" rel="noopener">이용약관</a></p>
-    </form>`, { locked: true });
+      <button type="button" class="text-link" data-tab="rooms">← 파티장 목록으로</button>
+    </form>
+    </section>
+    <p class="legal-links"><a href="/privacy" target="_blank" rel="noopener">개인정보처리방침</a> · <a href="/terms" target="_blank" rel="noopener">이용약관</a></p>`, { locked: true });
   const form = document.querySelector('#create-form');
+  wireLandingTabs(QS.get('ref') || QS.get('tab') === 'create' ? 'create' : 'rooms');
+  form.querySelectorAll('input[name=who]').forEach((r) => r.addEventListener('change', () => {
+    const self = form.who.value === 'self';
+    form.querySelector('.owner-label').textContent = self ? '내 이름' : '주인공 이름';
+    form.querySelector('.listed-hint').textContent = self ? '누구나 첫 화면에서 골라 들어와 축하해 줄 수 있어요.' : '누구나 첫 화면에서 골라 들어올 수 있어요. 깜짝 파티라면 주인공도 목록에서 볼 수 있으니, 완전히 비밀로 하려면 꺼 주세요.';
+  }));
   form.month.value = String(today.m);
   form.day.value = String(today.d);
   wireVenuePicker(form);
@@ -2447,9 +2522,11 @@ async function startLanding() {
     try {
       const r = await api('/api/rooftops', {
         method: 'POST',
-        body: { owner: nc.value, month: Number(form.month.value), day: Number(form.day.value), hour: Number(form.hour.value), venue: form.venue.value, testSeconds: form.test.checked ? 60 : 0, ref: QS.get('ref') || undefined },
+        body: { owner: nc.value, month: Number(form.month.value), day: Number(form.day.value), hour: Number(form.hour.value), venue: form.venue.value, testSeconds: form.test.checked ? 60 : 0, ref: QS.get('ref') || undefined,
+          self: form.who.value === 'self', listed: form.listed.checked },
       });
       store.set(`host:${r.id}`, r.hostKey);
+      track(form.who.value === 'self' ? 'create_self' : 'create_friend');
       showCreated(r);
     } catch (err) {
       form.querySelector('.form-error').textContent = err.message;
@@ -2457,6 +2534,78 @@ async function startLanding() {
       btn.textContent = '파티장 열기';
     }
   });
+}
+
+// ── 첫 화면 탭: 파티장 고르기(게임 서버 고르듯) / 새 파티 열기 ──
+let roomsCache = null;
+let roomFilter = 'all';
+let roomsTimer = null;
+function wireLandingTabs(first) {
+  const show = (tab) => {
+    sheetBody.querySelectorAll('[role=tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
+    sheetBody.querySelector('#tab-rooms').hidden = tab !== 'rooms';
+    sheetBody.querySelector('#tab-create').hidden = tab !== 'create';
+    sheetBody.closest('.sheet-card')?.scrollTo?.(0, 0);
+    if (tab === 'rooms') loadRooms();
+  };
+  sheetBody.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => show(b.dataset.tab)));
+  sheetBody.querySelector('#go-create').addEventListener('click', () => show('create'));
+  sheetBody.querySelector('#rooms-refresh').addEventListener('click', () => loadRooms());
+  sheetBody.querySelectorAll('[data-filter]').forEach((b) => b.addEventListener('click', () => {
+    roomFilter = b.dataset.filter;
+    sheetBody.querySelectorAll('[data-filter]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    renderRooms();
+  }));
+  clearInterval(roomsTimer);
+  roomsTimer = setInterval(() => { if (!sheetBody.querySelector('#tab-rooms')?.hidden && !document.hidden) loadRooms(true); }, 20_000);
+  show(first);
+}
+async function loadRooms(quiet = false) {
+  const list = sheetBody.querySelector('.room-list');
+  if (!list) return;
+  if (!quiet && !roomsCache) list.innerHTML = '<li class="room-empty">파티장 목록을 불러오는 중…</li>';
+  try {
+    const d = await api('/api/rooftops');
+    serverOffset = d.now - Date.now();
+    roomsCache = d.rooms;
+  } catch { if (!roomsCache) list.innerHTML = '<li class="room-empty">목록을 불러오지 못했어요. 새로고침을 눌러주세요.</li>'; return; }
+  renderRooms();
+}
+function roomWhen(r) {
+  const now = serverNow();
+  if (now >= r.igniteAt) return { live: true, text: '지금 파티 중' };
+  const left = r.igniteAt - now;
+  const h = Math.floor(left / 3600_000);
+  const m = Math.ceil((left % 3600_000) / 60_000);
+  return { live: false, text: h >= 24 ? `${Math.floor(h / 24)}일 뒤 점등` : h >= 1 ? `${h}시간 ${m}분 뒤 점등` : `${m}분 뒤 점등` };
+}
+function renderRooms() {
+  const list = sheetBody.querySelector('.room-list');
+  if (!list || !roomsCache) return;
+  const rooms = roomsCache.filter((r) => {
+    const w = roomWhen(r);
+    return roomFilter === 'all' || (roomFilter === 'live' ? w.live : !w.live && r.igniteAt - serverNow() < 6 * 3600_000);
+  });
+  if (!rooms.length) {
+    list.innerHTML = `<li class="room-empty">${roomsCache.length ? '조건에 맞는 파티장이 없어요.' : '아직 열린 파티장이 없어요. 첫 파티장을 열어보세요!'}</li>`;
+    return;
+  }
+  list.innerHTML = rooms.map((r) => {
+    const w = roomWhen(r);
+    const full = r.online >= r.cap;
+    const load = full ? ['가득', 'full'] : r.online >= r.cap * 0.6 ? ['북적', 'busy'] : ['원활', 'ok'];
+    const v = VENUES[r.venue] || VENUES[DEFAULT_VENUE];
+    return `<li><a class="room-item${w.live ? ' live' : ''}" href="/r/${esc(r.id)}" data-venue="${esc(r.venue)}">
+      <span class="room-thumb venue-thumb" aria-hidden="true"></span>
+      <span class="room-main">
+        <b class="room-title">${esc(r.owner)}의 생일 파티${r.self ? '' : ' <i class="room-tag">깜짝</i>'}</b>
+        <span class="room-sub">${esc(v.name)} · <span class="${w.live ? 'room-live' : ''}">${w.text}</span></span>
+        <span class="room-sub">등불 ${r.lanterns}개${r.bots ? ` · 응원단 ${r.bots}` : ''}</span>
+      </span>
+      <span class="room-load ${load[1]}" title="접속 ${r.online}/${r.cap}명"><b>${r.online}</b>/${r.cap}<small>${full ? '구경 가능' : load[0]}</small></span>
+    </a></li>`;
+  }).join('');
+  list.querySelectorAll('.room-item').forEach((a) => a.addEventListener('click', () => track('room_pick')));
 }
 
 // 파티 장소 고르기: 고르면 뒤 배경이 바로 그 장소로 바뀐다
@@ -2481,6 +2630,32 @@ function showCreated(r) {
   const ownerUrl = `${friendUrl}?k=${r.ownerKey}`;
   const hostUrl = `${friendUrl}?h=${r.hostKey}`;
   const isTest = r.igniteAt - r.now < 3600_000;
+  if (r.self) {
+    store.set(`owner:${r.id}`, r.ownerKey);
+    openSheet(`
+    <h2>${esc(r.owner)}님의 생일 파티장을 열었어요</h2>
+    <p class="sheet-lead">${isTest ? '시험용 파티장이라 1분 뒤에 불이 켜지고 10분 뒤에 닫혀요.' : `${revealLabel(r.igniteAt)}에 다 같이 불을 켜고, 다음 날 0시 5분에 파티장이 닫혀요.`}</p>
+    <div class="link-card">
+      <p class="link-title">친구들에게 보낼 초대 링크</p>
+      <p class="link-desc">${r.listed ? '파티장 목록에도 보여서 누구나 골라 들어올 수 있어요.' : '이 링크로만 들어올 수 있어요.'}</p>
+      <input id="link-friend" readonly value="${esc(friendUrl)}">
+      <button class="btn" data-copy="link-friend">초대 링크 복사</button>
+    </div>
+    <div class="link-card">
+      <p class="link-title">내 입장 링크 (나만 보관)</p>
+      <p class="link-desc">주인공으로 들어가는 링크예요. 응원단 보내기·관리도 여기서 해요. 다른 사람에게 보내지 마세요.</p>
+      <input id="link-owner" readonly value="${esc(ownerUrl)}">
+      <button class="btn" data-copy="link-owner">내 링크 복사</button>
+    </div>
+    <p class="copy-status" role="status"></p>
+    <a class="btn primary wide" href="/r/${esc(r.id)}?k=${esc(r.ownerKey)}">내 파티장으로 들어가기</a>`, { locked: true });
+    sheetBody.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => {
+      const input = document.getElementById(b.dataset.copy);
+      input.select();
+      copyText(input.value, sheetBody.querySelector('.copy-status'));
+    }));
+    return;
+  }
   openSheet(`
     <h2>${esc(r.owner)}의 파티장을 열었어요</h2>
     <p class="sheet-lead">${isTest ? '시험용 파티장이라 1분 뒤에 불이 켜지고 10분 뒤에 닫혀요.' : `${revealLabel(r.igniteAt)}에 불이 켜지고, 다음 날 0시 5분에 파티장이 닫혀요.`} 링크 두 개를 각각 보내주세요.</p>
@@ -2579,12 +2754,13 @@ async function startRoom() {
   }
   if (sheet.classList.contains('locked')) closeSheet();
   serverOffset = data.now - Date.now();
-  Object.assign(ROOF_STATE, { owner: data.owner, igniteAt: data.igniteAt, endAt: data.endAt || 0, isOwner: data.role === 'owner', role: data.role, candlesOut: !!data.candlesOut });
+  Object.assign(ROOF_STATE, { owner: data.owner, igniteAt: data.igniteAt, endAt: data.endAt || 0, isOwner: data.role === 'owner', role: data.role, candlesOut: !!data.candlesOut,
+    self: !!data.self, canManage: !!data.canManage, listed: !!data.listed });
   loadVenue(data.venue);
   if (data.thanks) showThanks(data.thanks);
   if (data.candlesOut) world.setCandles(false);
   if (HOST_KEY && data.role !== 'host') HOST_KEY = null; // 저장된 관리 키가 맞지 않으면 버린다
-  if (data.role === 'host') {
+  if (data.canManage) {
     ROOF_STATE.hidden = data.lanterns.filter((l) => l.hidden);
     data.lanterns = data.lanterns.filter((l) => !l.hidden);
     ROOF_STATE.keys = { ownerKey: data.ownerKey, hostKey: data.hostKey };
@@ -2601,10 +2777,11 @@ async function startRoom() {
   igniteBtn.textContent = '점등 다시 보기';
   igniteBtn.addEventListener('click', () => startIgnite({ replay: true }));
 
-  if (ROOF_STATE.isOwner && serverNow() < ROOF_STATE.igniteAt - 15_000) {
+  if (ROOF_STATE.isOwner && !ROOF_STATE.self && serverNow() < ROOF_STATE.igniteAt - 15_000) {
     return showDoor(data.lanternCount || 0, data.giftCount || 0);
   }
   for (const l of data.lanterns) hangLantern(l);
+  addBots(data.bots || []);
   for (const g of data.gifts || []) gifts.add(g);
   if (!before) setLitInstantly();
   if (before) addCalendarButton();
@@ -2622,7 +2799,7 @@ function askVisitor(saved) {
   const colors = [0xf29bb3, 0x8fd3c1, 0xb9a6f2, 0xffc46b];
   openSheet(`
     <h2>${esc(ROOF_STATE.owner)}의 파티장에 들어가요</h2>
-    <p class="sheet-lead">${esc(ROOF_STATE.owner)}는 ${revealLabel(ROOF_STATE.igniteAt)} 점등 전까지 이 파티장을 볼 수 없어요. 친구들끼리 등불을 모아 깜짝 놀라게 해주세요.</p>
+    <p class="sheet-lead">${ROOF_STATE.self ? `${esc(ROOF_STATE.owner)}가 직접 연 생일 파티예요. 등불을 달고 ${revealLabel(ROOF_STATE.igniteAt)}에 다 같이 불을 켜요.` : `${esc(ROOF_STATE.owner)}는 ${revealLabel(ROOF_STATE.igniteAt)} 점등 전까지 이 파티장을 볼 수 없어요. 친구들끼리 등불을 모아 깜짝 놀라게 해주세요.`}</p>
     <form id="visitor-form">
       <label class="field"><span>내 이름</span><input id="visitor-name" name="name" maxlength="10" required placeholder="예: 수아" value="${esc(saved?.name || '')}"></label>
       <fieldset class="swatches"><legend>내 옷 색</legend>
@@ -2722,6 +2899,7 @@ async function openDoor() {
     const d = await api(`/api/rooftops/${ROOM_ID}${authQuery()}`);
     for (const l of d.lanterns) hangLantern(l);
     for (const g of d.gifts || []) gifts.add(g);
+    addBots(d.bots || []);
   } catch { /* 등불은 실시간으로 다시 받는다 */ }
   setTimeout(() => { door.hidden = true; }, 1600);
   enterRoom({ name: ROOF_STATE.owner, color: 0xffc46b, outfit: store.get('owner-outfit') });
@@ -2813,8 +2991,13 @@ function handleNet(m) {
   } else if (m.t === 'leave') {
     const p = peersById.get(m.id);
     if (p) { removePerson(p); peersById.delete(m.id); }
+  } else if (m.t === 'bots') {
+    addBots(m.bots || []);
+    if (!ROOF_STATE.isOwner || ROOF_STATE.self) setStatus(`응원단 ${m.bots.length}명이 등불을 들고 왔어요`);
   } else if (m.t === 'count') {
-    countEl.textContent = `함께 있는 친구 ${m.n}명${m.watching ? ` · 구경 ${m.watching}명` : ''}`;
+    ROOF_STATE.humans = m.n;
+    ROOF_STATE.watching = m.watching;
+    renderCount();
   } else if (m.t === 'react') {
     showReaction(m.id ? peersById.get(m.id) : null, m.kind);
   } else if (m.t === 'thanks') {

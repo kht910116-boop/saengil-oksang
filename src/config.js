@@ -96,6 +96,10 @@ export const MAX_YEARS = 40; // 알고 지낸 햇수(0은 '모름')
 export const THANKS_TEMPLATES = ['다들 정말 고마워!', '최고의 생일이었어', '덕분에 행복한 하루야', '사랑해 친구들', '내년에도 같이 불 켜자'];
 // 공동 목표: 등불이 이만큼 모이면 점등 때 유성우
 export const GOAL_LANTERNS = 20;
+// 가상 응원단: 파티장을 연 사람이 주인공을 위해 보내는 가상 친구(등불 하나씩 들고 와서 유성우 목표를 채운다)
+export const MAX_BOTS = 20;
+export const BOT_NAMES = ['별이', '콩이', '달이', '초코', '구름', '보리', '모카', '쿠키', '하루', '솜이', '도토리', '라온', '봄이', '단비', '꿀이', '해피', '럭키', '나나', '루루', '토리'];
+export const BOT_PREFIX = '응원단';
 
 // 공개 시각 표시: 0시는 '자정', 나머지는 '오후 9시'처럼
 export function revealLabel(ms, { withDate = true } = {}) {

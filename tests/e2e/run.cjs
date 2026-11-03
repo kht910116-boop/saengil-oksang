@@ -78,8 +78,24 @@ const layout = async (p, label) => {
   try {
     log('1. 첫 화면: 공개 시각 고르기, 남은 수, 출처 전달');
     const host = await mk();
+    // 목록에 보일 진짜 파티장(사흘 뒤 생일) 하나와, 생일자가 직접 연 파티장 하나를 미리 만든다
+    const soon = new Date(Date.now() + 3 * 86400_000 + 9 * 3600_000);
+    const mkRoom = (body) => fetch(`${B}/api/rooftops`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-forwarded-for': `10.9.0.${Math.floor(Math.random() * 200)}` }, body: JSON.stringify({ month: soon.getUTCMonth() + 1, day: soon.getUTCDate(), hour: 21, ...body }) }).then((x) => x.json());
+    const listed = await mkRoom({ owner: '하은', venue: 'aurora' });
+    const selfRoom = await mkRoom({ owner: '지우', venue: 'sky', self: true });
+    await host.goto(`${B}/`, { waitUntil: 'commit' });
+    await host.waitForSelector('.room-item', { timeout: 60000 });
+    ok(await host.isVisible('#tab-rooms') && !(await host.isVisible('#create-form')), '첫 화면은 파티장 고르기');
+    const titles = await host.$$eval('.room-title', (e) => e.map((x) => x.textContent));
+    ok(titles.some((t) => t.includes('하은')) && titles.some((t) => t.includes('지우')), '공개 파티장이 목록에 보임');
+    await snap(host, '00-room-list');
+    await layout(host, '파티장 목록');
+    await host.click(`.room-item[href="/r/${listed.id}"]`);
+    await host.waitForSelector('#visitor-form', { timeout: 60000 });
+    ok(host.url().endsWith(`/r/${listed.id}`), '목록에서 고른 파티장으로 들어감');
     await host.goto(`${B}/?ref=nope`, { waitUntil: 'commit' });
     await host.waitForSelector('#create-form', { timeout: 60000 });
+    ok(await host.isVisible('.who-pick'), '"내 생일 직접 열기" 선택지');
     await snap(host, '01-landing');
     ok(await host.$$eval('#create-hour option', (o) => o.length) === 17, '공개 시각 선택지 17개(자정 + 오전 8시~오후 11시)');
     await host.fill('#create-owner', '민지');
@@ -206,6 +222,19 @@ const layout = async (p, label) => {
     await f1.evaluate(() => document.querySelector('#sheet.open .sheet-close')?.click());
     await f2.evaluate(() => document.querySelector('#sheet.open .sheet-close')?.click());
 
+    log('3c. 가상 응원단: 만든 사람이 보내면 모두의 화면에 등장하고 등불을 단다');
+    const before3c = await f2.evaluate(() => ({ people: window.__lantern.people.length, lanterns: window.__lantern.lanterns }));
+    await f1.click('#btn-more');
+    await f1.click('#btn-manage');
+    await f1.waitForSelector('[data-bots="5"]');
+    await snap(f1, '12b-bots-manage');
+    await f1.click('[data-bots="5"]');
+    await f2.waitForFunction((n) => window.__lantern.people.length >= n + 5, before3c.people, { timeout: 20000 }).then(() => ok(true, '응원단 5명이 친구 화면에 나타남')).catch(() => ok(false, '응원단 등장'));
+    await f2.waitForFunction((n) => window.__lantern.lanterns >= n + 5, before3c.lanterns, { timeout: 20000 }).then(() => ok(true, '응원단 등불 5개')).catch(() => ok(false, '응원단 등불'));
+    ok((await f2.textContent('#count')).includes('응원단 5'), '접속 수에 응원단 따로 표시');
+    await f2.waitForTimeout(1500);
+    await snap(f2, '12c-bots-room');
+
     log('4. 점등: 모두의 화면, 기념사진 자동 촬영');
     await owner.waitForFunction(() => window.__lantern && window.__lantern.people.some((p) => p.me), null, { timeout: 200000, polling: 500 });
     ok(true, '점등 15초 전 주인공 입장');
@@ -262,6 +291,16 @@ const layout = async (p, label) => {
     ok((await f1.getAttribute('#cta a', 'href')) === `/?ref=${r.id}`, '"내 생일 파티 만들기"에 출처 포함');
     await snap(f1, '22-cta');
     await layout(f1, '내 파티 만들기 안내');
+
+    log('6b. 내 생일 직접 열기: 주인공이 문 앞 대기 없이 바로 들어가고 관리 메뉴가 있음');
+    const me2 = await mk();
+    await me2.goto(`${B}/r/${selfRoom.id}?k=${selfRoom.ownerKey}`, { waitUntil: 'commit' });
+    await me2.waitForSelector('#btn-more', { timeout: 120000 });
+    ok(!(await me2.isVisible('#door')), '문 앞 대기 화면 없음');
+    await me2.click('#btn-more');
+    ok(await me2.isVisible('#btn-manage'), '직접 연 생일자에게 관리 메뉴');
+    await me2.keyboard.press('Escape');
+    await me2.close();
 
     log('7. 닫힘: 닫는 시각이 되면 마무리 화면');
     await f2.waitForFunction(() => document.querySelector('.sheet-body h2')?.textContent.includes('파티장이 닫혔어요'), null, { timeout: 300000, polling: 1000 });
