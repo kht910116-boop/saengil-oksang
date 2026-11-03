@@ -370,6 +370,9 @@ export function buildCruise(scene) {
   hotspots.push(...party.hotspots);
 
   return finishWorld(scene, group, {
+    // 점등 구도: 갑판 뒤 난간 안쪽에서(난간·구명튜브가 앞을 가리지 않게)
+    igniteView: (portrait) => (portrait ? { cam: [0, 4.3, 11.2], look: [0, 4.2, -1] } : { cam: [0, 4.8, 11.3], look: [0, 4.3, -1], fov: 60 }),
+    skyNameZ: -6,
     id: 'cruise',
     floor,
     hemi,

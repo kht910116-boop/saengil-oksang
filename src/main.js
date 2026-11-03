@@ -574,6 +574,8 @@ let photoShot = null;
 function setSkyName(owner) {
   if (skyName) scene.remove(skyName);
   skyName = makeSkyName(['생일 축하해', owner]);
+  if (world.skyNameY) skyName.position.y = world.skyNameY;
+  if (world.skyNameZ) skyName.position.z = world.skyNameZ;
   scene.add(skyName);
 }
 
@@ -588,19 +590,23 @@ function makeSkyName([line1, line2]) {
     g.clearRect(0, 0, c.width, c.height);
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.shadowColor = 'rgba(255,196,107,0.95)';
-    g.shadowBlur = 36;
-    g.fillStyle = '#fff3d6';
-    g.font = '150px Jua, sans-serif';
-    g.fillText(line1, 700, 190);
-    g.font = '250px Jua, sans-serif';
-    g.fillText(line2, 700, 450);
+    const line = (text, size, y) => {
+      g.font = `${size}px Jua, sans-serif`;
+      // 1) 어두운 번짐으로 뒤의 전구 불빛과 떼어 놓고 2) 금빛 빛무리 3) 밝은 글자
+      g.shadowColor = 'rgba(20,10,40,0.85)'; g.shadowBlur = 28; g.lineWidth = 14; g.strokeStyle = 'rgba(40,20,60,0.55)'; g.strokeText(text, 700, y);
+      g.shadowColor = 'rgba(255,196,107,0.95)'; g.shadowBlur = 40; g.fillStyle = '#fff3d6'; g.fillText(text, 700, y);
+      g.shadowBlur = 0; g.fillStyle = '#fffaf0'; g.fillText(text, 700, y);
+    };
+    line(line1, 170, 180);
+    line(line2, 260, 450);
     tex.needsUpdate = true;
   };
   draw();
   document.fonts?.ready.then(draw);
   const m = new THREE.Mesh(new THREE.PlaneGeometry(10.5, 4.8), new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false, fog: false }));
-  m.position.set(0, 10.5, -6);
+  m.position.set(0, 10, -4.5);
+  m.renderOrder = 20;
+  m.material.depthTest = false; // 돔 뼈대·돛대·전구 줄에 가려지지 않게
   return m;
 }
 
@@ -641,11 +647,13 @@ function startIgnite(opts = {}) {
   if (ignite) return;
   if (!opts.replay && !lite) startCeremony('ignite'); // 다시 보기는 혼자 보는 것이라 대열 없이
   resetLights();
-  ignite = { t: 0, clicked: new Set() };
+  // 화면 그리는 속도와 상관없이 실제 시간으로 진행(느린 휴대폰에서도 친구들과 같은 박자, 슬로모션 없음)
+  ignite = { t: 0, start: performance.now(), clicked: new Set(), replay: !!opts.replay };
   ignitedThisSession = true;
   document.body.classList.add('is-igniting');
   sound.music('midnight', 'party'); // 점등 곡이 끝나면 파티 곡으로
-  if (!lite) recorder.start();
+  // 다시 보기는 처음 녹화한 진짜 점등 영상을 덮어쓰지 않는다(놓친 사람이면 다시 보기를 녹화)
+  if (!lite && !(opts.replay && recorder.blob)) recorder.start();
   track('ignite_seen');
   document.querySelector('#goal').hidden = true;
   hideCta();
@@ -654,14 +662,14 @@ function startIgnite(opts = {}) {
 
 function updateIgnite(dt) {
   if (!ignite) return;
-  ignite.t += dt;
+  ignite.t = (performance.now() - ignite.start) / 1000;
   const t = ignite.t;
   const total = world.bulbs.length;
   world.hemi.intensity = THREE.MathUtils.lerp(world.hemi.intensity, t < 1.2 ? world.hemiBase * 0.4 : world.hemiBase * 0.83, dt * 3);
   world.ignite?.(t > 1.2 ? 1 : 0);
   for (const b of world.bulbs) {
     const on = t > 1.2 + (b.userData.order / total) * 3.4;
-    b.material.emissiveIntensity = THREE.MathUtils.lerp(b.material.emissiveIntensity, on ? 3.2 : 0.05, dt * (on ? 10 : 4));
+    b.material.emissiveIntensity = THREE.MathUtils.lerp(b.material.emissiveIntensity, on ? 3.2 : 0.05, Math.min(1, dt * (on ? 10 : 4)));
     if (on && !ignite.clicked.has(b.userData.order) && b.userData.order % 3 === 0) {
       ignite.clicked.add(b.userData.order);
       sound.click(b.userData.order / 3);
@@ -687,7 +695,7 @@ function updateIgnite(dt) {
   }
   skyName.material.opacity = THREE.MathUtils.lerp(skyName.material.opacity, t > 4.8 ? 1 : 0, dt * 1.5);
   if (t > 6.8 && !ignite.photo) { ignite.photo = true; photoPending = true; } // 이름이 떠오른 장면을 기념사진으로
-  if (t > 4.8) skyName.position.y = 10.5 + Math.sin(t * 0.8) * 0.15;
+  if (t > 4.8) skyName.position.y = (world.skyNameY ?? 10) + Math.sin(t * 0.8) * 0.15;
   if (t > 14) {
     recorder.stop();
     ignite = null;
@@ -1809,16 +1817,35 @@ const aura = (() => {
 })();
 const cerP = new THREE.Vector3();
 const cerL = new THREE.Vector3();
+const IGN_P = new THREE.Vector3();
+// 화각: 가로 화면 점등 때만 잠시 넓혔다가 천천히 원래대로
+const baseFov = () => (camera.aspect < 1 ? 62 : 50);
+function easeFov(target, dt) {
+  if (Math.abs(camera.fov - target) < 0.01) return;
+  camera.fov = THREE.MathUtils.lerp(camera.fov, target, Math.min(1, dt * 3));
+  camera.updateProjectionMatrix();
+}
+const IGN_L = new THREE.Vector3();
+// 점등 구도(장소가 igniteView로 바꿀 수 있다). 세로 화면은 더 뒤에서 넓게
+function igniteView(portrait) {
+  const v = world.igniteView?.(portrait);
+  if (v) return v;
+  return portrait ? { cam: [0, 3.9, 13.8], look: [0, 4.3, -1] } : { cam: [0, 4.2, 13.5], look: [0, 4.3, -1], fov: 58 };
+}
 function ceremonyCamera(dt) {
   const portrait = camera.aspect < 1;
   cerP.set(0, portrait ? 4.4 : 3.5, portrait ? 12.5 : 9.6);
   cerL.set(0, 1.5, 0);
-  if (ceremony.kind === 'candles') cerL.set(0.6, 1.5, 0);
+  if (ceremony?.kind === 'candles') cerL.set(0.6, 1.5, 0);
   if (ignite) {
-    const sky = THREE.MathUtils.smoothstep(ignite.t, 0.6, 2.4);
-    cerP.y -= sky * (cerP.y - 1.9);
-    cerL.lerp(tmp.set(0, 9, -6), sky);
-  }
+    // 불이 켜지는 동안 천천히 뒤로 물러나며 살짝 올려다본다:
+    // 하늘의 '생일 축하해 · 이름'은 화면 위쪽에 크게, 케이크와 친구들은 아래쪽에 함께 담기게
+    const k = THREE.MathUtils.smootherstep(ignite.t, 0.8, 4.6);
+    const v = igniteView(portrait);
+    cerP.lerp(IGN_P.set(...v.cam), k);
+    cerL.lerp(IGN_L.set(...v.look), k);
+    if (v.fov) easeFov(baseFov() + (v.fov - baseFov()) * k, dt);
+  } else easeFov(baseFov(), dt);
   world.clampCamera?.(cerP);
   camPos.lerp(cerP, Math.min(1, dt * 2));
   camera.position.copy(camPos);
@@ -2940,7 +2967,7 @@ function frame() {
     camLook.set(0, 3.2, 0);
   } else if (procession) processionCamera(dt);
   else if (candleBlow) candleCamera(dt);
-  else if (ceremony) ceremonyCamera(dt);
+  else if (ceremony || ignite?.replay) ceremonyCamera(dt); // 다시 보기도 점등식과 같은 구도로
   else if (groupPhoto) {
     camPos.lerp(PHOTO_CAM, Math.min(1, dt * 3));
     camera.position.copy(camPos);
@@ -2951,6 +2978,7 @@ function frame() {
     camera.position.copy(camPos);
     camLook.lerp(new THREE.Vector3(0, 2.4, 0), Math.min(1, dt * 2));
   } else {
+    if (!viewOverride) easeFov(baseFov(), dt);
     const mp = me.av.root.position;
     const camDist = dist + (ignite ? 3 : 0);
     const lift = me.av.lift || 0; // 열기구·트램펄린으로 떠오르면 카메라도 따라 올라간다
@@ -3093,6 +3121,11 @@ window.__lantern = {
   get gifts() { return gifts.list.length; },
   get fw() { return gifts.debug; },
   get people() { return people.map((p) => ({ name: p.label.textContent, me: p.isMe, x: +p.av.root.position.x.toFixed(2), z: +p.av.root.position.z.toFixed(2) })); },
+  // 시험용: 카메라 위치와 하늘 이름이 화면 어디에 보이는지(-1~1이면 화면 안)
+  get camInfo() {
+    const n = skyName ? skyName.position.clone().project(camera) : null;
+    return { cam: camera.position.toArray().map((v) => +v.toFixed(2)), look: camLook.toArray().map((v) => +v.toFixed(2)), fov: camera.fov, aspect: +camera.aspect.toFixed(3), name: n && [+n.x.toFixed(2), +n.y.toFixed(2), +n.z.toFixed(3)], namePos: skyName?.position.toArray(), opacity: skyName ? +skyName.material.opacity.toFixed(2) : 0 };
+  },
   get skyOpacity() { return skyName ? skyName.material.opacity : 0; },
   get igniting() { return !!ignite; },
   get candlesOut() { return ROOF_STATE.candlesOut; },

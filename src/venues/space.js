@@ -350,6 +350,9 @@ export function buildSpace(scene) {
   group.add(sat);
 
   return finishWorld(scene, group, {
+    // 점등 구도: 뒤쪽 유리벽 안쪽에서(바닥 유리 고리 불빛에 화면이 하얗게 날아가지 않게)
+    igniteView: (portrait) => (portrait ? { cam: [0, 4.3, 11.2], look: [0, 4.2, -1] } : { cam: [0, 4.8, 11.3], look: [0, 4.3, -1], fov: 60 }),
+    skyNameZ: -6,
     id: 'space',
     floor,
     hemi,
