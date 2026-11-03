@@ -103,6 +103,23 @@ function applyMusic() {
   a.play().then(() => fade(a, TRACKS[wanted].volume)).catch(() => {});
 }
 
+// 잡음 한 번(불꽃 소리용)
+function noiseBurst(start, dur, gain, freq) {
+  const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const f = ctx.createBiquadFilter();
+  f.type = 'bandpass';
+  f.frequency.value = freq;
+  const g = ctx.createGain();
+  g.gain.value = gain;
+  src.connect(f).connect(g).connect(master);
+  src.start(start);
+}
+
 export const sound = {
   get enabled() { return on; },
   async toggle() {
@@ -136,11 +153,20 @@ export const sound = {
     }
     return sound._dest.stream;
   },
-  pop() {
+  // 불꽃 터지는 소리: 낮은 '펑' + 잡음 + 반짝이는 고음(작은 불꽃은 가볍게)
+  pop(pattern = 'peony') {
     if (!on) return;
     const t = ctx.currentTime;
-    tone(220, t, 0.25, { type: 'sine', gain: 0.12 });
-    [1568, 2093, 2637].forEach((f, i) => tone(f, t + 0.05 + i * 0.04, 0.6, { type: 'triangle', gain: 0.03 }));
+    const small = pattern === 'small';
+    tone(small ? 260 : 150, t, small ? 0.2 : 0.4, { type: 'sine', gain: small ? 0.08 : 0.16 });
+    noiseBurst(t, small ? 0.15 : 0.35, small ? 0.05 : 0.11, 900);
+    [1568, 2093, 2637].forEach((f, i) => tone(f, t + 0.05 + i * 0.04, 0.6, { type: 'triangle', gain: small ? 0.015 : 0.03 }));
+  },
+  // 타닥타닥: 짧은 잡음을 흩뿌린다
+  crackle() {
+    if (!on) return;
+    const t = ctx.currentTime;
+    for (let i = 0; i < 26; i++) noiseBurst(t + Math.random() * 0.9, 0.025, 0.04 + Math.random() * 0.03, 3000 + Math.random() * 3000);
   },
   chime() {
     if (!on) return;

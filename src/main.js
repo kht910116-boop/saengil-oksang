@@ -258,7 +258,7 @@ function hangLantern({ id = null, name, msg, color, slot = lanterns.length, rel 
 }
 
 // ── 옥상 선물 ──
-const gifts = createGiftLayer(scene, { onBurst: () => sound.pop() });
+const gifts = createGiftLayer(scene, { onBurst: (pattern) => sound.pop(pattern), onCrackle: () => sound.crackle() });
 const giftLabel = (g) => (g.anonymous || !g.name ? '누군가' : g.name);
 
 // ── 조작 ──
@@ -1674,7 +1674,7 @@ function frame() {
   if (bubbleFor) placeLabel(bubble, bubbleFor.mesh.position, bubbleY);
 
   world.update(t, dt);
-  gifts.update(dt, t);
+  gifts.update(dt, t, { camera, viewHeight: renderer.domElement.height });
   updateIgnite(dt);
   sparks.update(dt);
   meteors.update(dt, camera);
@@ -1716,4 +1716,5 @@ window.__lantern = {
   get endAt() { return ROOF_STATE.endAt; },
   walkTo(x, z) { if (me) me.target = new THREE.Vector3(x, 0, z); },
   openLantern(i) { if (lanterns[i]) showLantern(lanterns[i]); },
+  addFireworks(n, colors = [0xf29bb3, 0xffc46b, 0x8fd3c1, 0xb9a6f2]) { for (let i = 0; i < n; i++) gifts.add({ id: 9000 + i, item: 'fireworks', color: colors[i % colors.length], name: '', anonymous: true, x: 0, z: 0 }); },
 };
