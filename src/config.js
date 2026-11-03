@@ -1,5 +1,5 @@
 // 서버와 화면이 같이 쓰는 설정
-export const SERVICE_NAME = '생일 옥상';
+export const SERVICE_NAME = '오늘의 주인공';
 export const CONTACT_EMAIL = 'ddorami2003@gmail.com';
 export const MAX_LANTERNS = 180; // 전구 줄의 등불 자리 수(183)보다 조금 적게
 export const OWNER_EARLY_MS = 15_000; // 주인공은 자정 15초 전에 입장
@@ -71,10 +71,10 @@ export function validateName(input, { max = 10 } = {}) {
   return { ok: true, value };
 }
 
-// 옥상 선물: 친구가 사서 옥상에 보이게 하는 디지털 선물(현금으로 바꿔주지 않음)
+// 파티장 선물: 친구가 사서 파티장에 보이게 하는 디지털 선물(현금으로 바꿔주지 않음)
 export const GIFT_ITEMS = {
-  fireworks: { name: '불꽃놀이', price: 3000, limit: 20, desc: '점등 순간 옥상 위로 불꽃이 터져요. 점등이 지났다면 바로 터져요.' },
-  balloons: { name: '풍선 묶음', price: 2000, limit: 30, desc: '옥상에 풍선 묶음이 하나 더 떠올라요.' },
+  fireworks: { name: '불꽃놀이', price: 3000, limit: 20, desc: '점등 순간 파티장 위로 불꽃이 터져요. 점등이 지났다면 바로 터져요.' },
+  balloons: { name: '풍선 묶음', price: 2000, limit: 30, desc: '파티장에 풍선 묶음이 하나 더 떠올라요.' },
   topping: { name: '케이크 토핑', price: 1000, limit: 24, desc: '케이크 위에 딸기가 하나 올라가요.' },
 };
 // 결제 방식: 'free'면 모든 선물이 무료. 나중에 유료로 바꿀 때 서버의 결제 확인 부분만 바꾼다.
@@ -117,9 +117,9 @@ export function nextReveal(month, day, hour = 0, now = Date.now()) {
   return dayStart(year) + hour * 3600_000;
 }
 
-// 하루짜리 옥상: 생일 다음 날 0시 5분에 닫히고 데이터를 지운다
+// 하루짜리 파티장: 생일 다음 날 0시 5분에 닫히고 데이터를 지운다
 export const CLOSE_AFTER_MIDNIGHT_MS = 5 * 60_000;
-export const MAX_ROOFTOPS_PER_DAY = 300; // 하루에 새로 만들 수 있는 옥상 수(한국 시간 기준)
+export const MAX_ROOFTOPS_PER_DAY = 300; // 하루에 새로 만들 수 있는 파티장 수(한국 시간 기준)
 export const MAX_DAYS_AHEAD = 60; // 생일 60일 전부터 만들 수 있다
 // 공개 시각이 속한 날(한국 시간)의 다음 날 0시 5분
 export function closeAt(igniteAt) {
@@ -128,3 +128,21 @@ export function closeAt(igniteAt) {
   const dayStart = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - KST;
   return dayStart + 86400_000 + CLOSE_AFTER_MIDNIGHT_MS;
 }
+
+// 서비스 이름과 파티 장소·의상 목록(나중에 유료 장소·한정 의상을 붙일 수 있게 목록으로 둔다)
+export const BRAND = '오늘의 주인공';
+export const VENUES = {
+  cruise: { name: '밤바다 크루즈', desc: '달빛 아래 유람선 갑판, 바다 위에서 터지는 불꽃' },
+  aurora: { name: '오로라 유리돔', desc: '눈 덮인 설원의 투명한 돔, 점등 때 하늘을 덮는 오로라' },
+  sky: { name: '구름 위 열기구 광장', desc: '노을 진 구름 위에 떠 있는 광장과 열기구들' },
+  space: { name: '우주 전망 라운지', desc: '지구가 내려다보이는 우주정거장 라운지' },
+  rooftop: { name: '도시 옥상', desc: '불 켜진 도시가 내려다보이는 밤 옥상' },
+};
+export const DEFAULT_VENUE = 'cruise';
+// 입장할 때 고르는 파티 의상. 나중에 유료 의상을 추가할 수 있게 목록으로 둔다.
+export const OUTFITS = {
+  dress: { name: '드레스' },
+  suit: { name: '정장' },
+  party: { name: '파티복' },
+};
+export const DEFAULT_OUTFIT = 'party';

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createFireworks } from './fireworks.js';
 
-// 옥상 선물의 3D 연출: 풍선 묶음, 케이크 토핑(딸기), 자정 불꽃놀이
+// 파티장 선물의 3D 연출: 풍선 묶음, 케이크 토핑(딸기), 자정 불꽃놀이
 const BALLOON_COLORS = [0xf29bb3, 0x8fd3c1, 0xffd97a, 0xb9a6f2, 0xfbf4e8];
 
 function balloonCluster(color) {

@@ -41,7 +41,7 @@ before(async () => {
 });
 after(() => { server?.kill('SIGTERM'); fs.rmSync(DIR, { recursive: true, force: true }); });
 
-test('옥상 만들기: 공개 시각·출처·거절 규칙', async () => {
+test('파티장 만들기: 공개 시각·출처·거절 규칙', async () => {
   const cap0 = (await call('GET', '/api/capacity')).data.left;
   const r = await call('POST', '/api/rooftops', { owner: '민지', month: 11, day: 20, hour: 21 });
   // 오늘 날짜에 따라 60일 밖이면 거절될 수 있어 둘 다 허용하되 형식은 확인한다
@@ -55,6 +55,29 @@ test('옥상 만들기: 공개 시각·출처·거절 규칙', async () => {
   assert.equal(b.status, 201);
   const cap1 = (await call('GET', '/api/capacity')).data.left;
   assert.ok(cap1 < cap0, '남은 수가 줄어야 함');
+});
+
+test('파티 장소와 의상: 목록에 있는 것만', async () => {
+  const d = await create();
+  assert.equal(d.data.venue, 'cruise', '고르지 않으면 기본 장소');
+  const a = await create({ venue: 'aurora' });
+  assert.equal(a.status, 201);
+  assert.equal((await call('GET', `/api/rooftops/${a.data.id}`)).data.venue, 'aurora');
+  assert.equal((await create({ venue: 'moon' })).status, 400);
+  assert.equal((await create({ venue: '__proto__' })).status, 400);
+  const open = (outfit) => new Promise((resolve) => {
+    const ws = new WebSocket(`ws://localhost:${PORT}/ws?room=${a.data.id}`);
+    ws.msgs = [];
+    ws.on('message', (raw) => { const m = JSON.parse(raw); ws.msgs.push(m); if (m.t === 'welcome') resolve(ws); });
+    ws.on('open', () => ws.send(JSON.stringify({ t: 'join', name: '수아', color: gold, outfit })));
+  });
+  const w1 = await open('suit');
+  const w2 = await open('bikini');
+  assert.equal(w2.msgs.find((m) => m.t === 'welcome').peers[0].outfit, 'suit');
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(w1.msgs.find((m) => m.t === 'join').peer.outfit, 'party', '모르는 의상은 기본 의상으로');
+  w1.close();
+  w2.close();
 });
 
 test('등불: 문구 번호만, 관계·햇수, 이름 필터', async () => {
@@ -91,7 +114,7 @@ test('주인공 답례·촛불: 주인공만, 점등 뒤에만', async () => {
   assert.equal(view.thanks, '최고의 생일이었어');
 });
 
-test('하루짜리 옥상: 닫는 시각이 지나면 알리고 지움', async () => {
+test('하루짜리 파티장: 닫는 시각이 지나면 알리고 지움', async () => {
   const { data: roof } = await create({ testSeconds: 1, testEndSeconds: 2 });
   const ws = new WebSocket(`ws://localhost:${PORT}/ws?room=${roof.id}`);
   const got = await new Promise((resolve) => {
@@ -130,7 +153,7 @@ test('측정·통계·백업: 운영자 키가 있어야 열림', async () => {
   assert.equal((await fetch(`${BASE}/admin/stats`)).status, 404);
   const stats = await fetch(`${BASE}/admin/stats?key=k-test`);
   assert.equal(stats.status, 200);
-  assert.ok((await stats.text()).includes('만든 옥상'));
+  assert.ok((await stats.text()).includes('만든 파티장'));
   const bk = await fetch(`${BASE}/admin/backup?key=k-test`);
   assert.equal(bk.status, 200);
   assert.ok((await bk.arrayBuffer()).byteLength > 1000);

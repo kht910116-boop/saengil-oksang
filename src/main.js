@@ -3,7 +3,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { buildWorld, ROOF } from './world.js';
+import { buildWorld } from './world.js';
 import { createAvatar } from './avatar.js';
 import { sound } from './audio.js';
 import { api, connectRoom, track, reportError } from './net.js';
@@ -14,14 +14,14 @@ import { createRecorder, saveVideo, calendarFile } from './recorder.js';
 // 화면 오류는 운영자가 볼 수 있게 서버에 남긴다
 window.addEventListener('error', (e) => reportError(`${e.message} @${(e.filename || '').split('/').pop()}:${e.lineno}`));
 window.addEventListener('unhandledrejection', (e) => reportError(`promise: ${e.reason?.message || e.reason}`));
-import { LANTERN_TEMPLATES, renderTemplate, GIFT_ITEMS, PAYMENT_MODE, josa, validateName, revealLabel, LANTERN_RELATIONS, MAX_YEARS, THANKS_TEMPLATES, GOAL_LANTERNS } from './config.js';
+import { LANTERN_TEMPLATES, renderTemplate, GIFT_ITEMS, PAYMENT_MODE, josa, validateName, revealLabel, LANTERN_RELATIONS, MAX_YEARS, THANKS_TEMPLATES, GOAL_LANTERNS, VENUES, DEFAULT_VENUE, BRAND, OUTFITS, DEFAULT_OUTFIT } from './config.js';
 import { createGiftLayer } from './gifts.js';
 import './style.css';
 
-// ── 경로: / 옥상 만들기 · /r/demo 샘플 · /r/:id 실제 옥상 ──
+// ── 경로: / 파티장 만들기 · /r/demo 샘플 · /r/:id 실제 파티장 ──
 const path = location.pathname;
 const roomMatch = path.match(/^\/r\/([\w-]{4,16})\/?$/);
-// 서버 없이 띄우는 미리보기 페이지는 window.__FORCE_MODE = 'demo' 로 샘플 옥상만 연다
+// 서버 없이 띄우는 미리보기 페이지는 window.__FORCE_MODE = 'demo' 로 샘플 파티장만 연다
 const MODE = window.__FORCE_MODE || (path === '/' || path === '/index.html' ? 'landing' : roomMatch?.[1] === 'demo' ? 'demo' : roomMatch ? 'room' : 'landing');
 const ROOM_ID = MODE === 'room' ? roomMatch[1] : null;
 const QS = new URLSearchParams(location.search);
@@ -38,15 +38,15 @@ const LANTERN_COLORS = [
 ];
 const HAT_COLORS = [0xffc46b, 0xf29bb3, 0xb9a6f2, 0x8fd3c1];
 const DEMO_FRIENDS = [
-  { name: '수아', color: 0x8fd3c1, msg: '민지야, 생일 축하해!' },
-  { name: '도윤', color: 0xb9a6f2, msg: '맛있는 거 먹으러 가자!' },
-  { name: '하은', color: 0xffc46b, msg: '우리 오래오래 보자' },
-  { name: '엄마', color: 0xf29bb3, msg: '태어나줘서 고마워' },
-  { name: '지호', color: 0x8fd3c1, msg: '꿈꾸는 일 모두 이루어지길' },
-  { name: '서진', color: 0xfbf4e8, msg: '다음 생일에도 같이 불 켜자' },
+  { name: '수아', color: 0x8fd3c1, msg: '민지야, 생일 축하해!', outfit: 'dress' },
+  { name: '도윤', color: 0xb9a6f2, msg: '맛있는 거 먹으러 가자!', outfit: 'suit' },
+  { name: '하은', color: 0xffc46b, msg: '우리 오래오래 보자', outfit: 'party' },
+  { name: '엄마', color: 0xf29bb3, msg: '태어나줘서 고마워', outfit: 'dress' },
+  { name: '지호', color: 0x8fd3c1, msg: '꿈꾸는 일 모두 이루어지길', outfit: 'suit' },
+  { name: '서진', color: 0xfbf4e8, msg: '다음 생일에도 같이 불 켜자', outfit: 'party' },
 ];
 
-// 옥상 상태
+// 파티장 상태
 const ROOF_STATE = { owner: '민지', igniteAt: Date.now() + 3 * 86400_000, endAt: 0, isOwner: false, role: 'friend', hidden: [], thanks: null, candlesOut: false, spectator: false };
 let serverOffset = 0;
 const serverNow = () => Date.now() + serverOffset;
@@ -56,7 +56,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* 저장 불가 환경 */ } },
 };
 
-// 옥상을 만든 사람의 관리 키: 링크(?h=)로 오거나, 만든 기기에 저장돼 있다
+// 파티장을 만든 사람의 관리 키: 링크(?h=)로 오거나, 만든 기기에 저장돼 있다
 let HOST_KEY = QS.get('h') || (ROOM_ID ? store.get(`host:${ROOM_ID}`) : null);
 if (QS.get('h') && ROOM_ID) store.set(`host:${ROOM_ID}`, QS.get('h'));
 function authQuery() {
@@ -95,7 +95,7 @@ try {
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 } catch (e) {
   showGlFail(e.message);
-  throw e; // 3D 없이는 옥상을 그릴 수 없어서 여기서 멈춘다
+  throw e; // 3D 없이는 파티장을 그릴 수 없어서 여기서 멈춘다
 }
 // 메모리가 부족한 폰에서 3D가 잠깐 꺼지면 되살리고, 안 되면 새로고침을 권한다
 let glLostTimer = null;
@@ -114,7 +114,7 @@ renderer.toneMappingExposure = 1.05;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 400);
 
-const world = buildWorld(scene);
+let world = buildWorld(scene, QS.get('venue') || DEFAULT_VENUE);
 const fill = new THREE.DirectionalLight(0xffe2c0, 0.9);
 camera.add(fill);
 fill.position.set(0.5, 1, 1);
@@ -164,7 +164,7 @@ const people = [];
 const peersById = new Map();
 
 function addPerson(opts, pos, { isMe = false, isOwner = false, npc = false } = {}) {
-  const av = createAvatar({ color: opts.color, hat: true, hatColor: isOwner ? 0xffd34d : opts.hatColor ?? HAT_COLORS[0], crown: isOwner });
+  const av = createAvatar({ color: opts.color, hat: true, hatColor: isOwner ? 0xffd34d : opts.hatColor ?? HAT_COLORS[0], crown: isOwner, outfit: OUTFITS[opts.outfit] ? opts.outfit : DEFAULT_OUTFIT });
   av.root.position.copy(pos);
   scene.add(av.root);
   const label = document.createElement('div');
@@ -187,10 +187,14 @@ let me = null;
 const lanterns = [];
 const lanternIds = new Set();
 // 1순위 자리를 테이블에서 가까운 순으로 채운 뒤 2순위 자리를 채운다
-const slots = world.lanternSlots
-  .slice()
-  .sort((a, b) => a.tier - b.tier || Math.hypot(a.pos.x, a.pos.z) - Math.hypot(b.pos.x, b.pos.z))
-  .map((s) => s.pos);
+let slots = [];
+function computeSlots() {
+  slots = world.lanternSlots
+    .slice()
+    .sort((a, b) => a.tier - b.tier || Math.hypot(a.pos.x, a.pos.z) - Math.hypot(b.pos.x, b.pos.z))
+    .map((s) => s.pos);
+}
+computeSlots();
 
 function lanternMesh(hex) {
   const g = new THREE.Group();
@@ -257,7 +261,25 @@ function hangLantern({ id = null, name, msg, color, slot = lanterns.length, rel 
   return l;
 }
 
-// ── 옥상 선물 ──
+// 파티 장소 바꾸기: 방 정보가 도착했을 때, 또는 만들기 화면에서 장소를 미리 볼 때
+function loadVenue(id) {
+  const v = VENUES[id] ? id : DEFAULT_VENUE;
+  if (world.id === v) return world;
+  world.dispose();
+  world = buildWorld(scene, v);
+  computeSlots();
+  lanterns.forEach((l, i) => {
+    const at = slots[i % slots.length];
+    l.slot = at.clone();
+    if (l.fly >= 1) l.mesh.position.copy(at);
+  });
+  for (const p of people) collide(p.av.root.position);
+  if (litLevel > 1) world.ignite?.(1);
+  if (ROOF_STATE.candlesOut) world.setCandles(false);
+  return world;
+}
+
+// ── 파티장 선물 ──
 const gifts = createGiftLayer(scene, { onBurst: (pattern) => sound.pop(pattern), onCrackle: () => sound.crackle() });
 const giftLabel = (g) => (g.anonymous || !g.name ? '누군가' : g.name);
 
@@ -374,11 +396,22 @@ let tapRingT = 0;
 function showTapRing(p) { tapRing.position.set(p.x, 0.02, p.z); tapRingT = 1; }
 
 // ── 이동 ──
-const HALF_W = ROOF.w / 2 - 0.6;
-const HALF_D = ROOF.d / 2 - 0.6;
+// 걸어 다닐 수 있는 영역: 사각형(w, d) 또는 둥근 바닥(r)
+function clampToBounds(p, extra = 0) {
+  const b = world.bounds;
+  if (b.r) {
+    const r = b.r - 0.6 + extra;
+    const d = Math.hypot(p.x, p.z);
+    if (d > r) { p.x *= r / d; p.z *= r / d; }
+    return;
+  }
+  const hw = b.w / 2 - 0.6 + extra;
+  const hd = b.d / 2 - 0.6 + extra;
+  p.x = THREE.MathUtils.clamp(p.x, -hw, hw);
+  p.z = THREE.MathUtils.clamp(p.z, -hd, hd);
+}
 function collide(p) {
-  p.x = THREE.MathUtils.clamp(p.x, -HALF_W, HALF_W);
-  p.z = THREE.MathUtils.clamp(p.z, -HALF_D, HALF_D);
+  clampToBounds(p);
   for (const o of world.obstacles) {
     const dx = p.x - o.x;
     const dz = p.z - o.z;
@@ -547,7 +580,8 @@ function updateIgnite(dt) {
   ignite.t += dt;
   const t = ignite.t;
   const total = world.bulbs.length;
-  world.hemi.intensity = THREE.MathUtils.lerp(world.hemi.intensity, t < 1.2 ? 0.35 : 0.75, dt * 3);
+  world.hemi.intensity = THREE.MathUtils.lerp(world.hemi.intensity, t < 1.2 ? world.hemiBase * 0.4 : world.hemiBase * 0.83, dt * 3);
+  world.ignite?.(t > 1.2 ? 1 : 0);
   for (const b of world.bulbs) {
     const on = t > 1.2 + (b.userData.order / total) * 3.4;
     b.material.emissiveIntensity = THREE.MathUtils.lerp(b.material.emissiveIntensity, on ? 3.2 : 0.05, dt * (on ? 10 : 4));
@@ -567,7 +601,7 @@ function updateIgnite(dt) {
     sound.swell();
     people.forEach((p, i) => setTimeout(() => p.av.hop(), i * 90));
     const giftN = gifts.list.length;
-    setStatus(`${ROOF_STATE.owner}의 생일이에요. ${josa([lanterns.length ? `등불 ${lanterns.length}개` : '', giftN ? `선물 ${giftN}개` : ''].filter(Boolean).join('와 ') || '옥상의 불', '이가')} 함께 켜졌어요`);
+    setStatus(`${ROOF_STATE.owner}의 생일이에요. ${josa([lanterns.length ? `등불 ${lanterns.length}개` : '', giftN ? `선물 ${giftN}개` : ''].filter(Boolean).join('와 ') || '파티장의 불', '이가')} 함께 켜졌어요`);
   }
   skyName.material.opacity = THREE.MathUtils.lerp(skyName.material.opacity, t > 4.8 ? 1 : 0, dt * 1.5);
   if (t > 6.8 && !ignite.photo) { ignite.photo = true; photoPending = true; } // 이름이 떠오른 장면을 기념사진으로
@@ -583,7 +617,7 @@ function updateIgnite(dt) {
   }
 }
 
-// 점등이 끝난 뒤: 기념사진 버튼, 주인공의 촛불 끄기, "내 옥상 만들기" 안내
+// 점등이 끝난 뒤: 기념사진 버튼, 주인공의 촛불 끄기, "내 파티 만들기" 안내
 function afterIgnite() {
   addPhotoButton();
   if ((ROOF_STATE.isOwner || MODE === 'demo') && !ROOF_STATE.candlesOut) addCandleButton();
@@ -598,6 +632,7 @@ function resetLights() {
 
 function setLitInstantly() {
   litLevel = 3.2;
+  world.ignite?.(1);
   for (const l of lanterns) l.mesh.userData.paperMat.emissiveIntensity = 1.6;
 }
 
@@ -704,7 +739,7 @@ function hideBubble() { bubble.hidden = true; bubbleFor = null; }
 document.querySelector('#btn-support').addEventListener('click', () => {
   openSheet(`
     <h2>전구 보태기</h2>
-    <p class="sheet-lead">생일 옥상은 누구나 무료로 열 수 있어요. 전구값을 조금 보태주시면 다음 옥상을 켜는 데 써요.</p>
+    <p class="sheet-lead">오늘의 주인공은 누구나 무료로 열 수 있어요. 전구값을 조금 보태주시면 다음 파티장을 켜는 데 써요.</p>
     <div class="qr-slot" role="img" aria-label="카카오페이 송금 QR이 들어갈 자리">카카오페이 송금 QR<br><small>이미지를 넣을 자리예요</small></div>
     <button class="btn wide" data-close>닫기</button>
     <p class="legal-links"><a href="/privacy" target="_blank" rel="noopener">개인정보처리방침</a> · <a href="/terms" target="_blank" rel="noopener">이용약관</a></p>`);
@@ -722,7 +757,7 @@ function countdownText() {
   if (left <= 0) {
     // 점등 뒤: 닫히는 시각을 알린다(마지막 10분은 초 단위)
     const close = Math.floor((ROOF_STATE.endAt - serverNow()) / 1000);
-    if (ROOF_STATE.endAt && close <= 600 && close > 0) return `옥상이 ${mmss(close)} 뒤에 닫혀요`;
+    if (ROOF_STATE.endAt && close <= 600 && close > 0) return `파티장이 ${mmss(close)} 뒤에 닫혀요`;
     return `${label} · 오늘 생일이에요`;
   }
   const s = Math.floor(left / 1000);
@@ -731,7 +766,7 @@ function countdownText() {
   return `점등까지 ${mmss(s)}`;
 }
 
-// 하루짜리 옥상: 닫히기 2시간 전부터 예고하고, 닫히면 마무리 화면을 띄운다
+// 하루짜리 파티장: 닫히기 2시간 전부터 예고하고, 닫히면 마무리 화면을 띄운다
 let closeNoticeShown = false;
 function checkClosing() {
   if (MODE !== 'room' || !ROOF_STATE.endAt) return;
@@ -742,10 +777,10 @@ function checkClosing() {
     banner.hidden = false;
     const d = new Date(ROOF_STATE.endAt + KST);
     const closeTime = `${d.getUTCHours()}시${d.getUTCMinutes() ? ` ${d.getUTCMinutes()}분` : ''}`;
-    banner.textContent = left <= 600_000 ? `옥상이 ${mmss(Math.floor(left / 1000))} 뒤에 닫혀요. 기념사진을 저장해 두세요` : `이 옥상은 ${closeTime}에 닫혀요. 등불과 선물도 함께 사라져요`;
+    banner.textContent = left <= 600_000 ? `파티장이 ${mmss(Math.floor(left / 1000))} 뒤에 닫혀요. 기념사진을 저장해 두세요` : `이 파티장은 ${closeTime}에 닫혀요. 등불과 선물도 함께 사라져요`;
     if (!closeNoticeShown) {
       closeNoticeShown = true;
-      setStatus('옥상이 곧 닫혀요. 닫히면 등불과 선물이 모두 사라지니 기념사진을 저장해 두세요', 7000);
+      setStatus('파티장이 곧 닫혀요. 닫히면 등불과 선물이 모두 사라지니 기념사진을 저장해 두세요', 7000);
     }
   }
 }
@@ -755,10 +790,10 @@ function showEnded() {
   endedShown = true;
   conn?.close();
   openSheet(`
-    <h2>옥상이 닫혔어요</h2>
-    <p class="sheet-lead">${esc(ROOF_STATE.owner)}의 생일 옥상이 끝났어요. 함께해 준 모든 분께 고마워요. 등불과 선물은 약속대로 모두 지웠어요.</p>
+    <h2>파티장이 닫혔어요</h2>
+    <p class="sheet-lead">${esc(ROOF_STATE.owner)}의 생일 파티이 끝났어요. 함께해 준 모든 분께 고마워요. 등불과 선물은 약속대로 모두 지웠어요.</p>
     ${photoShot ? '<button class="btn wide" id="ended-photo">기념사진 저장</button>' : ''}
-    <a class="btn primary wide" id="ended-cta" href="/?ref=${esc(ROOM_ID || '')}">내 생일 옥상 만들기</a>`, { locked: true });
+    <a class="btn primary wide" id="ended-cta" href="/?ref=${esc(ROOM_ID || '')}">내 생일 파티 만들기</a>`, { locked: true });
   sheetBody.querySelector('#ended-photo')?.addEventListener('click', savePhoto);
   sheetBody.querySelector('#ended-cta').addEventListener('click', () => track('cta_click'));
 }
@@ -841,7 +876,7 @@ function addCalendarButton() {
   btn.textContent = '자정 알림';
   document.querySelector('.actions').insertBefore(btn, igniteBtn);
   btn.addEventListener('click', () => {
-    const blob = calendarFile({ title: `${ROOF_STATE.owner}의 생일 옥상 점등`, url: `${location.origin}/r/${ROOM_ID}`, at: ROOF_STATE.igniteAt });
+    const blob = calendarFile({ title: `${ROOF_STATE.owner}의 생일 파티 점등`, url: `${location.origin}/r/${ROOM_ID}`, at: ROOF_STATE.igniteAt });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = 'saengil-oksang-midnight.ics';
@@ -881,17 +916,17 @@ function openManage() {
   ];
   const hidden = ROOF_STATE.hidden;
   openSheet(`
-    <h2>옥상 관리</h2>
-    <p class="sheet-lead">이 화면은 옥상을 만든 사람에게만 보여요.</p>
+    <h2>파티장 관리</h2>
+    <p class="sheet-lead">이 화면은 파티장을 만든 사람에게만 보여요.</p>
     ${links.map(([id, label, url]) => `
       <div class="link-card"><p class="link-title">${esc(label)}</p>
         <input id="${id}" readonly value="${esc(url)}"><button class="btn" data-copy="${id}">복사</button></div>`).join('')}
     <p class="copy-status" role="status"></p>
     <h3 class="sheet-sub">숨긴 등불 ${hidden.length}개</h3>
     ${hidden.length ? `<ul class="hidden-list">${hidden.map((l) => `<li><span><b>${esc(l.name)}</b> ${esc(l.msg)}</span><button class="btn" data-show="${l.id}">다시 보이기</button></li>`).join('')}</ul>` : '<p class="sheet-lead">숨긴 등불이 없어요. 등불을 누르면 숨길 수 있어요.</p>'}
-    <h3 class="sheet-sub">옥상 지우기</h3>
+    <h3 class="sheet-sub">파티장 지우기</h3>
     <p class="sheet-lead">등불이 모두 지워지고 되돌릴 수 없어요.</p>
-    <button class="btn wide danger" id="delete-roof">이 옥상 지우기</button>
+    <button class="btn wide danger" id="delete-roof">이 파티장 지우기</button>
     <p class="form-error" role="alert"></p>`);
   sheetBody.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => {
     const input = document.getElementById(b.dataset.copy);
@@ -921,7 +956,7 @@ function openManage() {
     try {
       await api(`/api/rooftops/${ROOM_ID}`, { method: 'DELETE', body: authBody() });
       store.set(`host:${ROOM_ID}`, null);
-      openSheet('<h2>옥상을 지웠어요</h2><p class="sheet-lead">등불이 모두 지워졌어요.</p><a class="btn primary wide" href="/">새 옥상 만들기</a>', { locked: true });
+      openSheet('<h2>파티장을 지웠어요</h2><p class="sheet-lead">등불이 모두 지워졌어요.</p><a class="btn primary wide" href="/">새 파티장 만들기</a>', { locked: true });
     } catch (err) {
       sheetBody.querySelector('.form-error').textContent = err.message;
       del.disabled = false;
@@ -935,13 +970,13 @@ function giftSummary() {
   const c = {};
   for (const g of gifts.list) c[g.item] = (c[g.item] || 0) + 1;
   const parts = Object.entries(GIFT_ITEMS).filter(([k]) => c[k]).map(([k, v]) => `${v.name} ${c[k]}`);
-  return parts.length ? `이 옥상에 온 선물: ${parts.join(', ')}` : '아직 온 선물이 없어요. 첫 선물을 보내보세요.';
+  return parts.length ? `이 파티장에 온 선물: ${parts.join(', ')}` : '아직 온 선물이 없어요. 첫 선물을 보내보세요.';
 }
 function openGiftSheet(send, defaultName) {
   const colors = [0xf29bb3, 0x8fd3c1, 0xffc46b, 0xb9a6f2, 0xfbf4e8];
   openSheet(`
     <h2>선물하기</h2>
-    <p class="sheet-lead">${esc(ROOF_STATE.owner)}의 옥상에 선물을 놓아요. ${esc(giftSummary())}</p>
+    <p class="sheet-lead">${esc(ROOF_STATE.owner)}의 파티장에 선물을 놓아요. ${esc(giftSummary())}</p>
     <form id="gift-form">
       <fieldset class="gift-items"><legend>선물</legend>
         ${Object.entries(GIFT_ITEMS).map(([k, v], i) => `
@@ -956,7 +991,7 @@ function openGiftSheet(send, defaultName) {
       ${PAYMENT_MODE === 'free' ? '<p class="test-note">지금은 모든 선물을 무료로 보낼 수 있어요. 10분에 10개까지 보낼 수 있어요.</p>' : ''}
       <p class="form-error" role="alert"></p>
       <button class="btn primary wide" type="submit">${PAYMENT_MODE === 'free' ? '선물하기' : '결제하고 선물하기'}</button>
-      <p class="legal-links">선물은 옥상을 꾸미는 디지털 선물이에요. 현금으로 바꿀 수 없어요.<br><button type="button" class="link-btn" id="open-support">서비스에 전구 보태기</button></p>
+      <p class="legal-links">선물은 파티장을 꾸미는 디지털 선물이에요. 현금으로 바꿀 수 없어요.<br><button type="button" class="link-btn" id="open-support">서비스에 전구 보태기</button></p>
     </form>`);
   document.querySelector('#open-support').addEventListener('click', () => document.querySelector('#btn-support').click());
   const form = document.querySelector('#gift-form');
@@ -1046,7 +1081,7 @@ function openLetters() {
         <div><p class="letter-msg">${esc(l.msg)}</p><p class="letter-from">${esc(l.name)}${lanternMeta(l) ? ` · ${esc(lanternMeta(l))}` : ''}</p></div>
         ${MODE === 'room' && l.id != null ? `<button type="button" class="bubble-act" data-letter="${i}">${canHide() ? '숨기기' : '신고'}</button>` : ''}
       </li>`).join('')}</ul>
-    <a class="btn wide cta-link" href="/?ref=${esc(ROOM_ID || '')}">내 생일 옥상도 만들기</a>`);
+    <a class="btn wide cta-link" href="/?ref=${esc(ROOM_ID || '')}">내 생일 파티도 만들기</a>`);
   sheetBody.querySelector('.cta-link').addEventListener('click', () => track('cta_click'));
   sheetBody.querySelectorAll('[data-thanks]').forEach((b) => b.addEventListener('click', () => sendThanks(Number(b.dataset.thanks), b)));
   sheetBody.querySelectorAll('[data-letter]').forEach((b) => b.addEventListener('click', async () => {
@@ -1144,16 +1179,16 @@ function wireInviteButton() {
   addTopButton('btn-invite', '초대', '<circle cx="9" cy="8" r="3.2"/><path d="M3 19v-1a6 6 0 0 1 12 0v1M18 8v6M15 11h6"/>', async () => {
     track('share_click');
     const url = `${location.origin}/r/${ROOM_ID}`;
-    const text = `${ROOF_STATE.owner}의 생일 옥상에 등불을 달아주세요. ${revealLabel(ROOF_STATE.igniteAt)}에 다 같이 불을 켜요. (${ROOF_STATE.owner}에게는 비밀!)`;
+    const text = `${ROOF_STATE.owner}의 생일 파티에 등불을 달아주세요. ${revealLabel(ROOF_STATE.igniteAt)}에 다 같이 불을 켜요. (${ROOF_STATE.owner}에게는 비밀!)`;
     if (navigator.share) {
-      try { await navigator.share({ title: '생일 옥상', text, url }); return; } catch (e) { if (e?.name === 'AbortError') return; }
+      try { await navigator.share({ title: '오늘의 주인공', text, url }); return; } catch (e) { if (e?.name === 'AbortError') return; }
     }
     const ok = await copyText(`${text}\n${url}`);
     setStatus(ok ? '초대 링크를 복사했어요. 단톡방에 붙여넣어 주세요' : '주소창의 링크를 복사해서 보내주세요');
   });
 }
 
-// ── "내 생일 옥상도 만들기" 안내 ──
+// ── "내 생일 파티도 만들기" 안내 ──
 function showCta() {
   const el = document.querySelector('#cta');
   if (!el || ROOF_STATE.ctaDismissed) return;
@@ -1202,12 +1237,12 @@ function updateFloats(dt) {
 async function startLanding() {
   sound.music('landing');
   setSkyName('민지');
-  document.querySelector('#owner').textContent = '생일 옥상';
+  document.querySelector('#owner').textContent = '오늘의 주인공';
   document.querySelector('#date').textContent = '친구 생일에 다 같이 불을 켜요';
   track('landing_visit');
   DEMO_FRIENDS.forEach((f, i) => {
     const a = (i / DEMO_FRIENDS.length) * Math.PI * 2;
-    addPerson({ name: f.name, color: f.color, hatColor: HAT_COLORS[i % 4] }, new THREE.Vector3(Math.cos(a) * 4.5, 0, Math.sin(a) * 4.5), { npc: true });
+    addPerson({ name: f.name, color: f.color, hatColor: HAT_COLORS[i % 4], outfit: f.outfit }, new THREE.Vector3(Math.cos(a) * 4.5, 0, Math.sin(a) * 4.5), { npc: true });
     hangLantern({ name: f.name, msg: f.msg, color: f.color });
   });
   const months = Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}">${i + 1}월</option>`).join('');
@@ -1216,8 +1251,8 @@ async function startLanding() {
   const hourName = (h) => (h === 0 ? '자정 (0시)' : `${h < 12 ? '오전' : '오후'} ${h % 12 === 0 ? 12 : h % 12}시`);
   const hours = [0, ...Array.from({ length: 16 }, (_, i) => i + 8)].map((h) => `<option value="${h}">${hourName(h)}</option>`).join('');
   openSheet(`
-    <h2>생일 옥상 만들기</h2>
-    <p class="sheet-lead">친구들이 등불을 모으는 동안 주인공은 문밖에서 기다려요. 정한 시각이 되면 문이 열리고 모두의 화면에서 함께 불이 켜져요. 옥상은 생일 다음 날 0시 5분에 닫혀요.</p>
+    <h2>생일 파티 열기</h2>
+    <p class="sheet-lead">친구들이 등불을 모으는 동안 주인공은 문밖에서 기다려요. 정한 시각이 되면 문이 열리고 모두의 화면에서 함께 불이 켜져요. 파티장은 생일 다음 날 0시 5분에 닫혀요.</p>
     <p class="capacity" role="status"></p>
     <form id="create-form">
       <label class="field"><span>주인공 이름</span><input id="create-owner" name="owner" maxlength="10" required placeholder="예: 민지"></label>
@@ -1225,25 +1260,27 @@ async function startLanding() {
         <label class="field"><span>생일 월</span><select id="create-month" name="month">${months}</select></label>
         <label class="field"><span>생일 일</span><select id="create-day" name="day">${days}</select></label>
       </div>
+      ${venuePickerHtml(world.id)}
       <label class="field"><span>다 같이 불을 켤 시각 (생일 당일)</span><select id="create-hour" name="hour">${hours}</select><small class="field-hint">자정이 부담되면 생일 저녁처럼 모이기 쉬운 시간을 골라주세요.</small></label>
       <label class="check"><input id="create-test" type="checkbox" name="test"> 시험해 보기: 1분 뒤에 바로 점등할게요</label>
       <p class="form-error" role="alert"></p>
-      <button class="btn primary wide" type="submit">옥상 열기</button>
-      <a class="text-link" href="/r/demo">샘플 옥상 먼저 둘러보기</a>
+      <button class="btn primary wide" type="submit">파티장 열기</button>
+      <a class="text-link" href="/r/demo">샘플 파티장 먼저 둘러보기</a>
       <p class="legal-links"><a href="/privacy" target="_blank" rel="noopener">개인정보처리방침</a> · <a href="/terms" target="_blank" rel="noopener">이용약관</a></p>
     </form>`, { locked: true });
   const form = document.querySelector('#create-form');
   form.month.value = String(today.m);
   form.day.value = String(today.d);
-  // 오늘 더 만들 수 있는 옥상 수
+  wireVenuePicker(form);
+  // 오늘 더 만들 수 있는 파티장 수
   api('/api/capacity').then((c) => {
     const el = sheetBody.querySelector('.capacity');
     if (!el) return;
     if (c.left <= 0) {
-      el.textContent = '오늘 만들 수 있는 옥상이 다 찼어요. 내일 0시에 다시 열려요.';
+      el.textContent = '오늘 만들 수 있는 파티장이 다 찼어요. 내일 0시에 다시 열려요.';
       el.classList.add('full');
       form.querySelector('button[type=submit]').disabled = true;
-    } else if (c.left <= 30) el.textContent = `오늘 만들 수 있는 옥상이 ${c.left}개 남았어요.`;
+    } else if (c.left <= 30) el.textContent = `오늘 만들 수 있는 파티장이 ${c.left}개 남았어요.`;
   }).catch(() => {});
   form.addEventListener('input', () => { form.querySelector('.form-error').textContent = ''; });
   form.addEventListener('submit', async (e) => {
@@ -1252,20 +1289,36 @@ async function startLanding() {
     if (!nc.ok) { form.querySelector('.form-error').textContent = `주인공 ${nc.error}`; return; }
     const btn = form.querySelector('button[type=submit]');
     btn.disabled = true;
-    btn.textContent = '옥상 여는 중…';
+    btn.textContent = '파티장 여는 중…';
     try {
       const r = await api('/api/rooftops', {
         method: 'POST',
-        body: { owner: nc.value, month: Number(form.month.value), day: Number(form.day.value), hour: Number(form.hour.value), testSeconds: form.test.checked ? 60 : 0, ref: QS.get('ref') || undefined },
+        body: { owner: nc.value, month: Number(form.month.value), day: Number(form.day.value), hour: Number(form.hour.value), venue: form.venue.value, testSeconds: form.test.checked ? 60 : 0, ref: QS.get('ref') || undefined },
       });
       store.set(`host:${r.id}`, r.hostKey);
       showCreated(r);
     } catch (err) {
       form.querySelector('.form-error').textContent = err.message;
       btn.disabled = false;
-      btn.textContent = '옥상 열기';
+      btn.textContent = '파티장 열기';
     }
   });
+}
+
+// 파티 장소 고르기: 고르면 뒤 배경이 바로 그 장소로 바뀐다
+function venuePickerHtml(current) {
+  const cards = Object.entries(VENUES).map(([id, v]) => `
+    <label class="venue-card" data-venue="${id}"><input type="radio" name="venue" value="${id}"${id === current ? ' checked' : ''}><span class="venue-thumb"></span><span class="venue-name">${esc(v.name)}</span></label>`).join('');
+  return `<fieldset class="venue-pick"><legend>파티 장소</legend><div class="venue-grid">${cards}</div><p class="venue-desc">${esc(VENUES[current]?.desc || '')}</p></fieldset>`;
+}
+function wireVenuePicker(root, onPick) {
+  root.querySelectorAll('input[name=venue]').forEach((r) => r.addEventListener('change', () => {
+    if (!r.checked) return;
+    loadVenue(r.value);
+    root.querySelector('.venue-desc').textContent = VENUES[r.value].desc;
+    sound.click?.(2);
+    onPick?.(r.value);
+  }));
 }
 
 function showCreated(r) {
@@ -1274,8 +1327,8 @@ function showCreated(r) {
   const hostUrl = `${friendUrl}?h=${r.hostKey}`;
   const isTest = r.igniteAt - r.now < 3600_000;
   openSheet(`
-    <h2>${esc(r.owner)}의 옥상을 열었어요</h2>
-    <p class="sheet-lead">${isTest ? '시험용 옥상이라 1분 뒤에 불이 켜지고 10분 뒤에 닫혀요.' : `${revealLabel(r.igniteAt)}에 불이 켜지고, 다음 날 0시 5분에 옥상이 닫혀요.`} 링크 두 개를 각각 보내주세요.</p>
+    <h2>${esc(r.owner)}의 파티장을 열었어요</h2>
+    <p class="sheet-lead">${isTest ? '시험용 파티장이라 1분 뒤에 불이 켜지고 10분 뒤에 닫혀요.' : `${revealLabel(r.igniteAt)}에 불이 켜지고, 다음 날 0시 5분에 파티장이 닫혀요.`} 링크 두 개를 각각 보내주세요.</p>
     <div class="link-card">
       <p class="link-title">친구들에게 보낼 링크</p>
       <p class="link-desc">친구들이 들어와서 등불을 달아요.</p>
@@ -1290,12 +1343,12 @@ function showCreated(r) {
     </div>
     <div class="link-card">
       <p class="link-title">나만 갖고 있을 관리 링크</p>
-      <p class="link-desc">링크를 다시 보거나, 등불을 숨기거나, 옥상을 지울 때 써요. 다른 사람에게 보내지 마세요.</p>
+      <p class="link-desc">링크를 다시 보거나, 등불을 숨기거나, 파티장을 지울 때 써요. 다른 사람에게 보내지 마세요.</p>
       <input id="link-host" readonly value="${esc(hostUrl)}">
       <button class="btn" data-copy="link-host">관리 링크 복사</button>
     </div>
     <p class="copy-status" role="status"></p>
-    <a class="btn primary wide" href="/r/${esc(r.id)}">옥상으로 가서 첫 등불 달기</a>`, { locked: true });
+    <a class="btn primary wide" href="/r/${esc(r.id)}">파티장으로 가서 첫 등불 달기</a>`, { locked: true });
   sheetBody.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => {
     const input = document.getElementById(b.dataset.copy);
     input.select();
@@ -1307,12 +1360,17 @@ function startDemo() {
   sound.music('rooftop');
   ROOF_STATE.owner = '민지';
   setSkyName('민지');
-  document.querySelector('#owner').textContent = '민지의 생일 옥상';
-  document.querySelector('#date').textContent = '샘플 옥상이에요';
-  me = addPerson({ name: '나', color: 0xf29bb3, hatColor: 0x8fd3c1 }, new THREE.Vector3(0, 0, 3.2), { isMe: true });
+  document.querySelector('#owner').textContent = '민지의 생일 파티';
+  document.querySelector('#date').textContent = '샘플 파티장이에요';
+  // 샘플에서는 다섯 장소를 바로 바꿔 볼 수 있다
+  addTopButton('btn-venue', '장소', '<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>', () => {
+    openSheet(`<h2>파티 장소 둘러보기</h2><p class="sheet-lead">파티를 열 때 이 다섯 곳 중에서 고를 수 있어요.</p><form id="venue-form">${venuePickerHtml(world.id)}</form>`);
+    wireVenuePicker(document.querySelector('#venue-form'), () => track('venue_preview'));
+  });
+  me = addPerson({ name: '나', color: 0xf29bb3, hatColor: 0x8fd3c1, outfit: QS.get('outfit') || 'dress' }, new THREE.Vector3(0, 0, 3.2), { isMe: true, isOwner: QS.get('as') === 'owner' });
   DEMO_FRIENDS.forEach((f, i) => {
     const a = (i / DEMO_FRIENDS.length) * Math.PI * 2;
-    addPerson({ name: f.name, color: f.color, hatColor: HAT_COLORS[i % 4] }, new THREE.Vector3(Math.cos(a) * 4.5, 0, Math.sin(a) * 4.5), { npc: true });
+    addPerson({ name: f.name, color: f.color, hatColor: HAT_COLORS[i % 4], outfit: f.outfit }, new THREE.Vector3(Math.cos(a) * 4.5, 0, Math.sin(a) * 4.5), { npc: true });
     hangLantern({ name: f.name, msg: f.msg, color: f.color });
   });
   countEl.textContent = `함께 있는 친구 ${people.length}명`;
@@ -1348,16 +1406,17 @@ async function startRoom() {
       break;
     } catch (err) {
       if (err.status && err.status < 500) {
-        openSheet(`<h2>옥상을 열지 못했어요</h2><p class="sheet-lead">${esc(err.message)}</p><a class="btn primary wide" href="/">새 옥상 만들기</a>`, { locked: true });
+        openSheet(`<h2>파티장을 열지 못했어요</h2><p class="sheet-lead">${esc(err.message)}</p><a class="btn primary wide" href="/">새 파티장 만들기</a>`, { locked: true });
         return;
       }
-      openSheet('<h2>옥상에 연결하는 중이에요</h2><p class="sheet-lead">잠시 연결이 끊겼어요. 자동으로 다시 연결하고 있어요.</p>', { locked: true });
+      openSheet('<h2>파티장에 연결하는 중이에요</h2><p class="sheet-lead">잠시 연결이 끊겼어요. 자동으로 다시 연결하고 있어요.</p>', { locked: true });
       await new Promise((r) => setTimeout(r, Math.min(10_000, 1500 * 2 ** i)));
     }
   }
   if (sheet.classList.contains('locked')) closeSheet();
   serverOffset = data.now - Date.now();
   Object.assign(ROOF_STATE, { owner: data.owner, igniteAt: data.igniteAt, endAt: data.endAt || 0, isOwner: data.role === 'owner', role: data.role, candlesOut: !!data.candlesOut });
+  loadVenue(data.venue);
   if (data.thanks) showThanks(data.thanks);
   if (data.candlesOut) world.setCandles(false);
   if (HOST_KEY && data.role !== 'host') HOST_KEY = null; // 저장된 관리 키가 맞지 않으면 버린다
@@ -1368,7 +1427,7 @@ async function startRoom() {
     addManageButton();
   }
   setSkyName(data.owner);
-  document.querySelector('#owner').textContent = `${data.owner}의 생일 옥상`;
+  document.querySelector('#owner').textContent = `${data.owner}의 생일 파티`;
   const tick = () => { document.querySelector('#date').textContent = countdownText(); checkClosing(); };
   tick();
   setInterval(tick, 1000);
@@ -1389,7 +1448,7 @@ async function startRoom() {
   // 이미 점등을 본 사람이 다시 들어오면 기념사진·촛불 버튼을 바로 보여준다
   if (!before && store.get(`seen:${ROOM_ID}`)) afterIgnite();
 
-  if (ROOF_STATE.isOwner) return enterRoom({ name: data.owner, color: 0xffc46b });
+  if (ROOF_STATE.isOwner) return enterRoom({ name: data.owner, color: 0xffc46b, outfit: store.get('owner-outfit') });
   let saved = store.get('visitor');
   if (saved && !validateName(saved.name).ok) saved = null;
   askVisitor(saved);
@@ -1398,15 +1457,16 @@ async function startRoom() {
 function askVisitor(saved) {
   const colors = [0xf29bb3, 0x8fd3c1, 0xb9a6f2, 0xffc46b];
   openSheet(`
-    <h2>${esc(ROOF_STATE.owner)}의 옥상에 들어가요</h2>
-    <p class="sheet-lead">${esc(ROOF_STATE.owner)}는 ${revealLabel(ROOF_STATE.igniteAt)} 점등 전까지 이 옥상을 볼 수 없어요. 친구들끼리 등불을 모아 깜짝 놀라게 해주세요.</p>
+    <h2>${esc(ROOF_STATE.owner)}의 파티장에 들어가요</h2>
+    <p class="sheet-lead">${esc(ROOF_STATE.owner)}는 ${revealLabel(ROOF_STATE.igniteAt)} 점등 전까지 이 파티장을 볼 수 없어요. 친구들끼리 등불을 모아 깜짝 놀라게 해주세요.</p>
     <form id="visitor-form">
       <label class="field"><span>내 이름</span><input id="visitor-name" name="name" maxlength="10" required placeholder="예: 수아" value="${esc(saved?.name || '')}"></label>
       <fieldset class="swatches"><legend>내 옷 색</legend>
         ${colors.map((c, i) => `<label class="swatch"><input type="radio" name="color" value="${c}" ${(saved?.color ?? colors[0]) === c ? 'checked' : ''}><span style="--c:${hex6(c)}" aria-label="옷 색 ${i + 1}"></span></label>`).join('')}
       </fieldset>
+      ${outfitPickerHtml(saved?.outfit)}
       <p class="form-error" role="alert"></p>
-      <button class="btn primary wide" type="submit">옥상으로 올라가기</button>
+      <button class="btn primary wide" type="submit">파티장으로 들어가기</button>
     </form>`, { locked: true });
   const form = document.querySelector('#visitor-form');
   form.addEventListener('input', () => { form.querySelector('.form-error').textContent = ''; });
@@ -1414,11 +1474,17 @@ function askVisitor(saved) {
     e.preventDefault();
     const nc = validateName(form.name.value);
     if (!nc.ok) { form.querySelector('.form-error').textContent = nc.error; return; }
-    const v = { name: nc.value, color: Number(new FormData(form).get('color')) };
+    const v = { name: nc.value, color: Number(new FormData(form).get('color')), outfit: new FormData(form).get('outfit') || DEFAULT_OUTFIT };
     store.set('visitor', v);
     closeSheet();
     enterRoom(v);
   });
+}
+
+// 파티 의상 고르기(드레스·정장·파티복)
+function outfitPickerHtml(current = DEFAULT_OUTFIT) {
+  const cur = OUTFITS[current] ? current : DEFAULT_OUTFIT;
+  return `<fieldset class="outfit-pick"><legend>파티 의상</legend><div class="outfit-row">${Object.entries(OUTFITS).map(([id, o]) => `<label class="outfit-chip"><input type="radio" name="outfit" value="${id}"${id === cur ? ' checked' : ''}><span>${esc(o.name)}</span></label>`).join('')}</div></fieldset>`;
 }
 
 function showDoor(count, giftCount = 0) {
@@ -1435,7 +1501,15 @@ function showDoor(count, giftCount = 0) {
   const title = door.querySelector('.door-title');
   const sub = door.querySelector('.door-sub');
   const cnt = door.querySelector('.door-count');
-  title.textContent = `${ROOF_STATE.owner}님, 옥상 문은 ${revealLabel(ROOF_STATE.igniteAt)}에 열려요`;
+  title.textContent = `${ROOF_STATE.owner}님, 파티장 문은 ${revealLabel(ROOF_STATE.igniteAt)}에 열려요`;
+  // 기다리는 동안 주인공이 입을 옷을 고른다(왕관과 망토는 주인공만)
+  if (!door.querySelector('.outfit-pick')) {
+    const wrap = document.createElement('form');
+    wrap.className = 'door-outfit';
+    wrap.innerHTML = outfitPickerHtml(store.get('owner-outfit')).replace('<legend>파티 의상</legend>', '<legend>입장할 때 입을 옷 · 왕관과 망토는 주인공만</legend>');
+    door.querySelector('.door-sound').before(wrap);
+    wrap.addEventListener('change', () => store.set('owner-outfit', new FormData(wrap).get('outfit')));
+  }
   track('owner_door');
   const render = () => {
     sub.textContent = countdownText();
@@ -1469,25 +1543,25 @@ async function openDoor() {
     for (const g of d.gifts || []) gifts.add(g);
   } catch { /* 등불은 실시간으로 다시 받는다 */ }
   setTimeout(() => { door.hidden = true; }, 1600);
-  enterRoom({ name: ROOF_STATE.owner, color: 0xffc46b });
+  enterRoom({ name: ROOF_STATE.owner, color: 0xffc46b, outfit: store.get('owner-outfit') });
 }
 
 function enterRoom(visitor) {
   sound.music('rooftop');
   track(ROOF_STATE.isOwner ? 'owner_enter' : 'friend_visit');
   const spawn = new THREE.Vector3((Math.random() - 0.5) * 4, 0, 3 + Math.random() * 2);
-  me = addPerson({ name: ROOF_STATE.isOwner ? ROOF_STATE.owner : visitor.name, color: visitor.color, hatColor: 0x8fd3c1 }, spawn, { isMe: true, isOwner: ROOF_STATE.isOwner });
+  me = addPerson({ name: ROOF_STATE.isOwner ? ROOF_STATE.owner : visitor.name, color: visitor.color, hatColor: 0x8fd3c1, outfit: visitor.outfit }, spawn, { isMe: true, isOwner: ROOF_STATE.isOwner });
   countEl.textContent = '연결 중';
   conn = connectRoom({
     room: ROOM_ID,
     key: ROOF_STATE.isOwner ? OWNER_KEY : null,
     hostKey: ROOF_STATE.role === 'host' ? HOST_KEY : null,
-    hello: { name: visitor.name, color: visitor.color, hat: Math.floor(Math.random() * 4) },
+    hello: { name: visitor.name, color: visitor.color, hat: Math.floor(Math.random() * 4), outfit: visitor.outfit },
     onMessage: handleNet,
     onClose: (code, fatal) => {
       if (code === 4004) return showEnded();
-      if (code === 4003) openSheet('<h2>옥상이 지워졌어요</h2><p class="sheet-lead">만든 사람이 이 옥상을 지웠어요.</p><a class="btn primary wide" href="/">새 옥상 만들기</a>', { locked: true });
-      if (code === 4002) setStatus('옥상이 가득 찼어요. 잠시 후 다시 들어와주세요.', 8000);
+      if (code === 4003) openSheet('<h2>파티장이 지워졌어요</h2><p class="sheet-lead">만든 사람이 이 파티장을 지웠어요.</p><a class="btn primary wide" href="/">새 파티장 만들기</a>', { locked: true });
+      if (code === 4002) setStatus('파티장이 가득 찼어요. 잠시 후 다시 들어와주세요.', 8000);
       else if (code === 4001) setStatus('아직 문이 열리지 않았어요.', 8000);
       else countEl.textContent = '다시 연결하는 중';
       if (fatal) countEl.textContent = '연결 끊김';
@@ -1505,12 +1579,12 @@ function enterRoom(visitor) {
   wireLettersButton();
   wireReactions();
   if (!ROOF_STATE.isOwner) wireInviteButton();
-  setStatus(ROOF_STATE.isOwner ? '친구들이 준비한 옥상이에요. 곧 점등이에요' : `등불을 달고, ${revealLabel(ROOF_STATE.igniteAt)}에 다시 와서 같이 불을 켜요`, 6500);
+  setStatus(ROOF_STATE.isOwner ? '친구들이 준비한 파티장이에요. 곧 점등이에요' : `등불을 달고, ${revealLabel(ROOF_STATE.igniteAt)}에 다시 와서 같이 불을 켜요`, 6500);
 }
 
 function addPeer(v) {
   if (peersById.has(v.id) || v.id === myId) return;
-  const p = addPerson({ name: v.name, color: v.color, hatColor: HAT_COLORS[v.hat % 4] }, new THREE.Vector3(v.x, 0, v.z), { isOwner: v.owner });
+  const p = addPerson({ name: v.name, color: v.color, hatColor: HAT_COLORS[v.hat % 4], outfit: v.outfit }, new THREE.Vector3(v.x, 0, v.z), { isOwner: v.owner });
   p.net = new THREE.Vector3(v.x, 0, v.z);
   peersById.set(v.id, p);
   return p;
@@ -1522,18 +1596,18 @@ function handleNet(m) {
     serverOffset = m.now - Date.now();
     for (const v of m.peers) addPeer(v);
     if (m.spectator && me) {
-      // 아바타 자리가 다 차서 구경 모드: 내 인형 없이 옥상을 둘러보고 등불·선물은 그대로 보낼 수 있다
+      // 아바타 자리가 다 차서 구경 모드: 내 인형 없이 파티장을 둘러보고 등불·선물은 그대로 보낼 수 있다
       ROOF_STATE.spectator = true;
       removePerson(me);
       me = null;
       document.body.classList.add('is-spectator');
-      setStatus('옥상이 가득 차서 구경 모드로 들어왔어요. 등불과 선물은 그대로 보낼 수 있어요', 7000);
+      setStatus('파티장이 가득 차서 구경 모드로 들어왔어요. 등불과 선물은 그대로 보낼 수 있어요', 7000);
     }
     countEl.textContent = `함께 있는 친구 ${m.peers.length + (m.spectator ? 0 : 1)}명`;
   } else if (m.t === 'join') {
     addPeer(m.peer);
-    if (m.peer.owner) setStatus(`${josa(ROOF_STATE.owner, '이가')} 옥상에 들어왔어요!`, 6000);
-    else setStatus(`${josa(m.peer.name, '이가')} 옥상에 올라왔어요`, 3000);
+    if (m.peer.owner) setStatus(`${josa(ROOF_STATE.owner, '이가')} 파티장에 들어왔어요!`, 6000);
+    else setStatus(`${josa(m.peer.name, '이가')} 파티장에 들어왔어요`, 3000);
   } else if (m.t === 'leave') {
     const p = peersById.get(m.id);
     if (p) { removePerson(p); peersById.delete(m.id); }
@@ -1615,7 +1689,7 @@ function frame() {
     lastSent = performance.now();
   }
 
-  // 실제 옥상: 자정이 되면 모두의 화면에서 점등
+  // 실제 파티장: 자정이 되면 모두의 화면에서 점등
   if (MODE === 'room' && (me || ROOF_STATE.spectator) && !ignitedThisSession && serverNow() >= ROOF_STATE.igniteAt && !store.get(`seen:${ROOM_ID}`) &&
       (serverNow() - ROOF_STATE.igniteAt < 600_000 || ROOF_STATE.isOwner)) {
     // 자정 직후에 있던 사람, 또는 자정 뒤 처음 들어온 주인공에게 점등을 한 번 보여준다(본 뒤에는 '점등 다시 보기'로)
@@ -1633,8 +1707,8 @@ function frame() {
     const mp = me.av.root.position;
     const camDist = dist + (ignite ? 3 : 0);
     const want = new THREE.Vector3(mp.x + Math.sin(yaw) * camDist, 2.6 + camDist * 0.42, mp.z + Math.cos(yaw) * camDist);
-    want.x = THREE.MathUtils.clamp(want.x, -HALF_W - 0.2, HALF_W + 0.2);
-    want.z = THREE.MathUtils.clamp(want.z, -HALF_D - 0.2, HALF_D + 0.2);
+    clampToBounds(want, 0.2);
+    world.clampCamera?.(want);
     const sky = ignite ? THREE.MathUtils.smoothstep(ignite.t, 0.6, 2.4) : 0;
     want.y -= sky * (want.y - 1.4);
     camPos.lerp(want, Math.min(1, dt * (ignite ? 2 : 5)));

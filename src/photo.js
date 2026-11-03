@@ -1,4 +1,4 @@
-// 점등 기념사진: 3D 화면을 잘라 세로 사진(1080×1350)으로 만들고 아래에 옥상 정보를 적는다.
+// 점등 기념사진: 3D 화면을 잘라 세로 사진(1080×1350)으로 만들고 아래에 파티장 정보를 적는다.
 // 3D 화면은 그린 직후에 그대로 베껴 와야 하므로 snapshot()은 렌더 직후 같은 틀에서 부른다.
 export function snapshot(sourceCanvas) {
   const c = document.createElement('canvas');
@@ -33,7 +33,7 @@ export async function composePhoto(shot, { owner, when, lanterns, gifts, friends
   g.shadowColor = 'rgba(255,196,107,0.6)';
   g.shadowBlur = 18;
   g.font = '86px Jua, sans-serif';
-  g.fillText(`${owner}의 생일 옥상`, 64, H - 200);
+  g.fillText(`${owner}의 생일 파티`, 64, H - 200);
   g.shadowBlur = 0;
   g.fillStyle = 'rgba(251,244,232,0.9)';
   g.font = '40px "Gowun Dodum", sans-serif';
@@ -43,6 +43,6 @@ export async function composePhoto(shot, { owner, when, lanterns, gifts, friends
   g.fillStyle = 'rgba(255,196,107,0.95)';
   g.font = '34px Jua, sans-serif';
   g.textAlign = 'right';
-  g.fillText('생일 옥상', W - 64, H - 84);
+  g.fillText('오늘의 주인공', W - 64, H - 84);
   return new Promise((resolve) => c.toBlob((b) => resolve(b), 'image/jpeg', 0.9));
 }

@@ -1,4 +1,4 @@
-// 브라우저 통합 시험: 주인공 1명 + 친구 2명이 옥상 만들기부터 닫힐 때까지 전 과정을 돈다.
+// 브라우저 통합 시험: 주인공 1명 + 친구 2명이 파티장 만들기부터 닫힐 때까지 전 과정을 돈다.
 // 실행: npm run build && npm run test:e2e   (Playwright와 Chromium이 필요: npx playwright install chromium)
 // 그래픽 카드가 없는 환경에서는 3D가 느려서 몇 분 걸린다.
 const { spawn } = require('node:child_process');
@@ -51,9 +51,9 @@ const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
     await host.check('#create-test');
     await host.click('#create-form button[type=submit]');
     await host.waitForSelector('#link-host', { timeout: 20000 });
-    ok((await host.textContent('.sheet-lead')).includes('10분 뒤에 닫혀요'), '시험용 옥상 안내에 닫히는 시각 표시');
+    ok((await host.textContent('.sheet-lead')).includes('10분 뒤에 닫혀요'), '시험용 파티장 안내에 닫히는 시각 표시');
 
-    // 흐름 시험용 옥상: 2분 뒤 점등, 점등 3분 뒤 닫힘
+    // 흐름 시험용 파티장: 2분 뒤 점등, 점등 3분 뒤 닫힘
     const r = await host.evaluate(async () => (await fetch('/api/rooftops', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ owner: '민지', month: 1, day: 1, testSeconds: 120, testEndSeconds: 180 }) })).json());
     const friendUrl = `${B}/r/${r.id}`;
     const ownerUrl = `${friendUrl}?k=${r.ownerKey}`;
@@ -119,19 +119,19 @@ const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
     ok((await f1.textContent('#thanks-banner')).includes('다들 정말 고마워'), '친구 화면에 답례 배너');
     await owner.click('.sheet-close').catch(() => {});
 
-    log('6. 기념사진 저장, "내 옥상 만들기"');
+    log('6. 기념사진 저장, "내 파티 만들기"');
     await f1.waitForSelector('#btn-photo', { timeout: 120000 });
     const [dl] = await Promise.all([f1.waitForEvent('download', { timeout: 30000 }).catch(() => null), f1.click('#btn-photo')]);
     ok(dl && (await dl.suggestedFilename()).endsWith('.jpg'), '기념사진(jpg) 저장');
     if (dl) await dl.saveAs(path.join(OUT, 'e2e-photo.jpg'));
     await f1.waitForSelector('#cta:not([hidden])', { timeout: 60000 });
-    ok((await f1.getAttribute('#cta a', 'href')) === `/?ref=${r.id}`, '"내 생일 옥상 만들기"에 출처 포함');
+    ok((await f1.getAttribute('#cta a', 'href')) === `/?ref=${r.id}`, '"내 생일 파티 만들기"에 출처 포함');
 
     log('7. 닫힘: 닫는 시각이 되면 마무리 화면');
-    await f2.waitForFunction(() => document.querySelector('.sheet-body h2')?.textContent.includes('옥상이 닫혔어요'), null, { timeout: 300000, polling: 1000 });
-    ok(true, '닫는 시각에 "옥상이 닫혔어요" 화면');
+    await f2.waitForFunction(() => document.querySelector('.sheet-body h2')?.textContent.includes('파티장이 닫혔어요'), null, { timeout: 300000, polling: 1000 });
+    ok(true, '닫는 시각에 "파티장이 닫혔어요" 화면');
     const gone = await fetch(`${B}/api/rooftops/${r.id}`);
-    ok(gone.status === 404, '닫힌 옥상은 서버에서 삭제됨');
+    ok(gone.status === 404, '닫힌 파티장은 서버에서 삭제됨');
 
     for (const p of pages) if (!p.isClosed()) ok(p.errs.length === 0, `콘솔 오류 없음 ${JSON.stringify(p.errs).slice(0, 200)}`);
   } catch (e) {

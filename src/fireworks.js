@@ -102,7 +102,7 @@ const SETTINGS = {
 
 export function createFireworks(scene, { onBurst, onCrackle } = {}) {
   const shells = [];
-  // 터질 때 옥상을 비추는 섬광(최대 2개를 돌려 쓴다)
+  // 터질 때 파티장을 비추는 섬광(최대 2개를 돌려 쓴다)
   const flashes = [0, 1].map(() => {
     const l = new THREE.PointLight(0xffffff, 0, 45, 1.6);
     scene.add(l);

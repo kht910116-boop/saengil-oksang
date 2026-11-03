@@ -13,13 +13,13 @@ Google Flow Music으로 만든 6곡 중 3곡을 골라 손질해 넣었습니다
 
 ---
 
-생일 옥상은 상황마다 다른 곡을 자동으로 바꿔 틉니다. 아래 3곡을 만들어 **파일 이름을 정확히 똑같이** 바꾼 뒤 보내 주시면 바로 연결됩니다. 파일이 없어도 서비스는 효과음만으로 정상 동작합니다.
+오늘의 주인공은 상황마다 다른 곡을 자동으로 바꿔 틉니다. 아래 3곡을 만들어 **파일 이름을 정확히 똑같이** 바꾼 뒤 보내 주시면 바로 연결됩니다. 파일이 없어도 서비스는 효과음만으로 정상 동작합니다.
 
 | 파일 이름 | 언제 나오나 | 길이 | 반복 |
 |---|---|---|---|
-| `bgm-rooftop.mp3` | 옥상에 있는 동안(첫 화면, 샘플 포함) | 2~3분 | 반복 재생 |
+| `bgm-rooftop.mp3` | 파티장에 있는 동안(첫 화면, 샘플 포함) | 2~3분 | 반복 재생 |
 | `bgm-door.mp3` | 주인공이 닫힌 문 앞에서 자정을 기다릴 때 | 1~2분 | 반복 재생 |
-| `bgm-midnight.mp3` | 자정 점등 순간 | 30~40초 | 한 번만 재생 후 옥상 곡으로 돌아감 |
+| `bgm-midnight.mp3` | 자정 점등 순간 | 30~40초 | 한 번만 재생 후 파티장 곡으로 돌아감 |
 
 ## 만드는 순서 (초등학생 버전)
 
@@ -36,11 +36,11 @@ Google Flow Music으로 만든 6곡 중 3곡을 골라 손질해 넣었습니다
 
 음악 생성 도구는 보통 영어 프롬프트를 더 잘 알아듣습니다. 영어를 그대로 붙여 넣으면 됩니다.
 
-### 1. `bgm-rooftop.mp3` — 밤 옥상의 생일 파티
+### 1. `bgm-rooftop.mp3` — 밤 파티장의 생일 파티
 
 > Cozy lo-fi acoustic instrumental for a small birthday gathering on a city rooftop at night. Warm nylon guitar, soft felt piano, gentle brushed drums, a little glockenspiel sparkle, faint distant city ambience. 76 BPM, relaxed and happy, a bit nostalgic. No vocals. Smooth loopable ending that flows back into the beginning. 2 to 3 minutes.
 
-(한국어 설명: 밤 옥상의 작은 생일 모임. 따뜻한 기타와 피아노, 살짝 반짝이는 글로켄슈필. 가사 없음. 끝과 처음이 자연스럽게 이어지게.)
+(한국어 설명: 밤 파티장의 작은 생일 모임. 따뜻한 기타와 피아노, 살짝 반짝이는 글로켄슈필. 가사 없음. 끝과 처음이 자연스럽게 이어지게.)
 
 ### 2. `bgm-door.mp3` — 문 앞에서 기다리는 설렘
 

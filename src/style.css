@@ -381,3 +381,35 @@ a.btn { display: block; text-align: center; text-decoration: none; }
 .tpl-btn:hover { border-color: var(--ink); }
 .thanks-box .templates { display: flex; flex-wrap: wrap; gap: 7px; margin: 8px 0 4px; }
 .rels { margin-top: 0; }
+
+/* 파티 장소 고르기 */
+.venue-pick { border: 0; padding: 0; margin: 0 0 12px; min-width: 0; }
+.venue-pick legend { font-size: 13px; color: #5a4f6c; margin-bottom: 6px; padding: 0; }
+.venue-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.venue-card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; min-width: 0; }
+.venue-card input { position: absolute; opacity: 0; pointer-events: none; }
+.venue-thumb { width: 100%; aspect-ratio: 1; border-radius: 12px; border: 2px solid transparent; box-shadow: 0 2px 6px rgba(20, 16, 40, 0.18); }
+.venue-card input:checked + .venue-thumb { border-color: var(--ink); box-shadow: 0 0 0 2px var(--bulb); }
+.venue-card input:focus-visible + .venue-thumb { outline: 2px solid var(--ink); outline-offset: 2px; }
+.venue-name { font-size: 11.5px; line-height: 1.25; text-align: center; color: #5a4f6c; word-break: keep-all; }
+.venue-card input:checked ~ .venue-name { color: var(--ink); font-weight: 700; }
+.venue-desc { margin: 6px 0 0; font-size: 12.5px; color: #8a7f98; min-height: 1.3em; }
+.venue-card[data-venue="cruise"] .venue-thumb { background: radial-gradient(circle at 70% 28%, #fff1d0 0 9%, transparent 10%), linear-gradient(#0a1230 0 55%, #1d3a7a 56% 100%); }
+.venue-card[data-venue="aurora"] .venue-thumb { background: radial-gradient(ellipse at 50% 100%, rgba(191, 226, 255, 0.55) 0 38%, transparent 40%), linear-gradient(160deg, #061026 20%, #2bff9a 45%, #7a5cff 60%, #0c2140 80%); }
+.venue-card[data-venue="sky"] .venue-thumb { background: radial-gradient(ellipse at 30% 85%, #fff 0 16%, transparent 17%), radial-gradient(ellipse at 75% 90%, #ffe3e0 0 20%, transparent 21%), linear-gradient(#141537, #7a3f78 50%, #ffae7a); }
+.venue-card[data-venue="space"] .venue-thumb { background: radial-gradient(circle at 50% 120%, #1a6aa8 0 45%, #6fc0ff 47%, transparent 52%), radial-gradient(circle at 20% 25%, #fff 0 2%, transparent 3%), radial-gradient(circle at 75% 40%, #fff 0 1.5%, transparent 2.5%), #03040c; }
+.venue-card[data-venue="rooftop"] .venue-thumb { background: linear-gradient(transparent 55%, #232846 55%), repeating-linear-gradient(90deg, transparent 0 6px, rgba(255, 210, 140, 0.8) 6px 8px), linear-gradient(#1f2547, #3a3160); }
+
+/* 파티 의상 고르기 */
+.outfit-pick { border: 0; padding: 0; margin: 4px 0 8px; min-width: 0; }
+.outfit-pick legend { font-size: 13px; color: #5a4f6c; margin-bottom: 7px; padding: 0; }
+.outfit-row { display: flex; gap: 8px; }
+.outfit-chip { position: relative; flex: 1; }
+.outfit-chip input { position: absolute; opacity: 0; pointer-events: none; }
+.outfit-chip span { display: block; text-align: center; padding: 9px 4px; border-radius: 12px; border: 1.5px solid #e4d9c6; background: #fffaf2; font-size: 14px; color: #5a4f6c; cursor: pointer; }
+.outfit-chip input:checked + span { border-color: var(--ink); background: var(--ink); color: var(--paper); }
+.outfit-chip input:focus-visible + span { outline: 2px solid var(--bulb); outline-offset: 2px; }
+.door-outfit { width: min(100%, 340px); margin: 6px auto 10px; }
+.door-outfit .outfit-pick legend { color: rgba(251, 244, 232, 0.8); text-align: center; width: 100%; }
+.door-outfit .outfit-chip span { background: rgba(251, 244, 232, 0.08); border-color: rgba(251, 244, 232, 0.25); color: var(--paper); }
+.door-outfit .outfit-chip input:checked + span { background: var(--bulb); border-color: var(--bulb); color: var(--ink); }

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <meta name="theme-color" content="#1f2547">
-  <title>생일 옥상</title>
+  <title>오늘의 주인공</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,22 +13,22 @@
 <body>
   <div id="boot" role="status" aria-live="polite">
     <div class="boot-lanterns" aria-hidden="true"><i></i><i></i><i></i></div>
-    <p class="boot-title">생일 옥상</p>
-    <p class="boot-sub">옥상에 불을 켜는 중이에요</p>
+    <p class="boot-title">오늘의 주인공</p>
+    <p class="boot-sub">파티장에 불을 켜는 중이에요</p>
   </div>
   <div id="inapp" hidden><span>카카오톡 안에서는 화면과 소리가 끊길 수 있어요</span><button type="button" data-open>다른 브라우저로 열기</button><button type="button" data-close aria-label="안내 닫기">×</button></div>
   <div id="glfail" hidden>
-    <h2>이 브라우저에서는 옥상을 열 수 없어요</h2>
+    <h2>이 브라우저에서는 파티장을 열 수 없어요</h2>
     <p>3D 화면을 지원하지 않는 브라우저예요. Chrome이나 Safari로 열어 주세요.</p>
     <button type="button" class="btn primary" data-copy>주소 복사하기</button>
     <p class="glfail-status" role="status"></p>
   </div>
-  <canvas id="scene" aria-label="밤 옥상 생일 파티 공간"></canvas>
+  <canvas id="scene" aria-label="생일 파티장"></canvas>
   <div id="labels" aria-hidden="true"></div>
 
   <header class="topbar">
     <div class="title">
-      <h1 id="owner">생일 옥상</h1>
+      <h1 id="owner">오늘의 주인공</h1>
       <p id="date"></p>
       <p id="goal" hidden></p>
     </div>
@@ -44,7 +44,7 @@
   <p id="thanks-banner" hidden></p>
   <p id="closing" hidden role="status"></p>
   <p id="status" role="status" aria-live="polite"></p>
-  <div id="cta" hidden><p>내 생일에도 이런 옥상을 열어 볼까요?</p><a class="btn primary" href="/">내 생일 옥상 만들기</a><button type="button" data-close aria-label="닫기">×</button></div>
+  <div id="cta" hidden><p>내 생일에도 이런 파티를 열어 볼까요?</p><a class="btn primary" href="/">내 생일 파티 만들기</a><button type="button" data-close aria-label="닫기">×</button></div>
   <div id="reactions" hidden aria-label="반응 보내기">
     <button type="button" data-react="clap" aria-label="박수">짝짝</button>
     <button type="button" data-react="heart" aria-label="하트">♥</button>
@@ -54,7 +54,7 @@
 
   <div id="joystick" aria-label="이동 조이스틱"><div class="knob"></div></div>
 
-  <nav class="actions" aria-label="옥상에서 할 일">
+  <nav class="actions" aria-label="파티장에서 할 일">
     <button id="btn-support" class="btn ghost" hidden>전구 보태기</button>
     <button id="btn-ignite" class="btn" hidden>점등 미리보기</button>
     <button id="btn-lantern" class="btn primary">등불 달기</button>

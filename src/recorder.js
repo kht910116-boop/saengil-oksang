@@ -41,7 +41,7 @@ export async function saveVideo(blob, filename) {
   const file = new File([blob], filename, { type: blob.type });
   if (navigator.canShare?.({ files: [file] })) {
     try {
-      await navigator.share({ files: [file], title: '생일 옥상' });
+      await navigator.share({ files: [file], title: '오늘의 주인공' });
       return 'shared';
     } catch (e) {
       if (e?.name === 'AbortError') return 'cancelled';
