@@ -459,6 +459,7 @@ a.btn { display: block; text-align: center; text-decoration: none; }
 /* 가볍게 보기 */
 #lite { display: none; }
 body.lite .top-right { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; max-width: 62vw; }
+body.lite .top-more-wrap { position: relative; }
 body.lite .topbar { background: none; }
 body.lite #scene, body.lite #labels, body.lite #joystick, body.lite #reactions { display: none !important; }
 body.lite { background: linear-gradient(#1b2146, #3a2b55) fixed; }
@@ -540,9 +541,24 @@ body.ceremony #emotes, body.ceremony #reactions [data-emote-open] { display: non
 .emote-zzz { color: #c9d0ff; font-size: 16px; font-style: italic; }
 
 /* 작은 휴대폰: 오른쪽 위 버튼은 아이콘만(소리·등불 수·접속 수는 글자 유지) */
-@media (max-width: 430px) {
-  .top-right .icon-btn:not(#btn-sound):not(#btn-letters) span { display: none; }
-  .top-right .icon-btn:not(#btn-sound):not(#btn-letters) { padding: 9px; }
+/* 오른쪽 위 '메뉴' 펼침 */
+.top-more-wrap { position: relative; display: flex; flex-direction: column; align-items: flex-end; }
+#top-more {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 6;
+  display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-width: 150px; padding: 6px;
+  border-radius: 16px; background: rgba(23, 27, 54, 0.94); border: 1px solid var(--line);
+  box-shadow: 0 10px 30px rgba(10, 8, 20, 0.45); animation: spot-in .2s ease-out;
+}
+#top-more[hidden] { display: none; }
+#top-more .icon-btn { border: 0; background: transparent; border-radius: 10px; padding: 10px 12px; font-size: 14px; white-space: nowrap; }
+#top-more .icon-btn:active { background: rgba(255, 255, 255, 0.1); }
+#btn-more[aria-expanded="true"] { color: var(--bulb); border-color: rgba(255, 196, 107, 0.45); }
+body.ceremony .top-more-wrap { display: none !important; }
+.top-right .icon-btn { white-space: nowrap; }
+/* 아주 낮은 화면(가로로 눕힌 휴대폰 등): 반응 버튼을 가로로 눕힌다 */
+@media (max-height: 560px) {
+  #reactions { flex-direction: row; bottom: calc(84px + var(--safe-b)); }
+  #emotes { right: 16px; bottom: calc(140px + var(--safe-b)); }
 }
 .emote-yum { color: #ffd97a; font-size: 16px; }
 .acc-row { flex-wrap: wrap; }
@@ -551,3 +567,65 @@ body.ceremony #emotes, body.ceremony #reactions [data-emote-open] { display: non
 #emotes .gm { background: #ffe1a8; }
 #emotes .gm:disabled { opacity: 0.4; }
 #song .song-sound { pointer-events: auto; margin-top: 6px; border: 0; border-radius: 16px; padding: 7px 14px; background: var(--bulb); color: var(--ink); font: inherit; font-size: 13.5px; }
+
+/* ── 휴대폰 화면 정리: 오른쪽 위 버튼은 좁게, 안내 문구는 왼쪽 아래로 비켜서 서로 겹치지 않게 ── */
+button { touch-action: manipulation; }
+@media (max-width: 520px) {
+  .topbar { padding: calc(10px + var(--safe-t)) 12px 22px; gap: 8px; }
+  .title { min-width: 0; flex: 1; }
+  .title h1 { font-size: clamp(19px, 5.4vw, 24px); line-height: 1.2; overflow-wrap: anywhere; }
+  .title p { font-size: 13px; }
+  #goal { font-size: 12px; padding: 3px 9px; max-width: 100%; }
+  .top-right { gap: 6px; flex-shrink: 0; }
+  .count { font-size: 12px; padding: 5px 10px; white-space: nowrap; }
+  .top-right .icon-btn { padding: 7px 10px 7px 8px; font-size: 12.5px; }
+  .top-right .icon-btn svg { width: 17px; height: 17px; }
+  #status {
+    left: 12px; right: auto; top: var(--hud-top, calc(104px + var(--safe-t))); transform: translate(0, -8px);
+    max-width: calc(100vw - 150px); text-align: left; font-size: 13.5px; padding: 8px 12px;
+    background: rgba(23, 27, 54, 0.88);
+  }
+  #status.show { transform: none; }
+  #thanks-banner, #closing { max-width: calc(100vw - 150px); left: 12px; transform: none; text-align: left; }
+  #thanks-banner { top: calc(var(--hud-top, calc(104px + var(--safe-t))) + 64px); }
+  #closing { top: calc(var(--hud-top, calc(104px + var(--safe-t))) + 110px); }
+  #reactions { right: 12px; gap: 7px; }
+  #reactions button { width: 44px; height: 44px; }
+  #emotes { right: 66px; max-width: calc(100vw - 80px); }
+  #emotes button { padding: 9px 8px; font-size: 13px; }
+  #joystick { left: 14px; width: 100px; height: 100px; }
+  .actions { padding: 10px 12px calc(12px + var(--safe-b)); gap: 6px; }
+  .actions .btn { padding: 11px 12px; font-size: 14px; }
+  .actions .btn.primary { padding: 12px 16px; font-size: 16px; }
+  .link-card input { font-size: 16px; }
+  .sheet-card { padding: 20px 16px 16px; margin: 0 6px calc(6px + var(--safe-b)); }
+}
+/* 낮은 화면: 반응 버튼을 조금 더 작게 */
+@media (max-width: 520px) and (max-height: 680px) {
+  #reactions { bottom: calc(140px + var(--safe-b)); gap: 6px; }
+  #reactions button { width: 40px; height: 40px; }
+  #joystick { bottom: calc(84px + var(--safe-b)); width: 92px; height: 92px; }
+  #joystick .knob { width: 40px; height: 40px; }
+}
+/* 휴대폰 가볍게 보기: 오른쪽 위 버튼은 세로 그대로(제목이 찌그러지지 않게), 목록은 그 아래부터 */
+@media (max-width: 520px) {
+  body.lite .top-right { flex-direction: column; flex-wrap: nowrap; max-width: none; }
+  body.lite #lite { top: calc(222px + var(--safe-t)); }
+}
+/* 주인공의 촛불 끄기: 하단 줄에 끼우지 않고 가운데 위에 크게 띄운다(하단 버튼이 두 줄로 넘치지 않게) */
+#btn-candles {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(84px + var(--safe-b)); z-index: 4;
+  padding: 14px 26px; font-size: 18px; white-space: nowrap; animation: candle-glow 1.8s ease-in-out infinite;
+}
+#btn-candles:active { transform: translateX(-50%) scale(.97); }
+@keyframes candle-glow { 50% { box-shadow: 0 0 34px rgba(255, 196, 107, 0.85), 0 3px 0 #c98f3e; } }
+body:has(#btn-candles) #spot-btn { display: none !important; }
+@media (max-width: 520px) {
+  /* '내 파티 만들기' 안내가 떠 있는 동안은 조이스틱·반응 버튼을 잠시 숨겨 겹치지 않게(× 또는 20초 뒤 다시 보임) */
+  body.cta-on #joystick, body.cta-on #reactions, body.cta-on #emotes { display: none !important; }
+  #cta { bottom: calc(76px + var(--safe-b)); width: calc(100vw - 24px); }
+}
+/* 생일 노래·점등식 중에는 가사 상자 뒤로 비치는 안내·배너를 잠시 숨겨 화면을 비운다 */
+body.ceremony #closing, body.ceremony #thanks-banner { display: none !important; }
+body:has(#song.show) #status { opacity: 0 !important; }
+body.lite #ceremony-hint { bottom: calc(24px + var(--safe-b)); }

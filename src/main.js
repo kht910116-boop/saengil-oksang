@@ -261,7 +261,7 @@ function updateGoal() {
   el.hidden = false;
   const n = lanterns.length;
   el.classList.toggle('reached', n >= GOAL_LANTERNS);
-  el.textContent = n >= GOAL_LANTERNS ? `등불 ${n}개 · 점등 때 유성우가 내려요` : `등불 ${n}/${GOAL_LANTERNS} · 다 모이면 점등 때 유성우`;
+  el.textContent = n >= GOAL_LANTERNS ? `등불 ${n}개 · 점등 때 유성우가 내려요` : `등불 ${n}/${GOAL_LANTERNS} · 다 모이면 유성우`;
 }
 
 function hangLantern({ id = null, name, msg, color, slot = lanterns.length, rel = -1, years = 0 }, { from = null } = {}) {
@@ -694,8 +694,6 @@ function updateIgnite(dt) {
     setTimeout(() => endCeremony('ignite'), 800);
     litLevel = 3.2;
     document.body.classList.remove('is-igniting');
-    igniteBtn.textContent = '점등 다시 보기';
-    igniteBtn.hidden = false;
     afterIgnite();
   }
 }
@@ -764,6 +762,13 @@ async function copyText(text, statusNode) {
 
 const igniteBtn = document.querySelector('#btn-ignite');
 const countEl = document.querySelector('#count');
+// 휴대폰에서 안내 문구를 제목(이름·날짜·목표) 바로 아래에 놓기 위해 제목 칸의 아래 끝을 CSS에 알려준다
+{
+  const titleEl = document.querySelector('.topbar .title');
+  const setHudTop = () => document.documentElement.style.setProperty('--hud-top', `${Math.round(titleEl.getBoundingClientRect().bottom + 8)}px`);
+  if (titleEl && 'ResizeObserver' in window) new ResizeObserver(setHudTop).observe(titleEl);
+  addEventListener('resize', () => titleEl && setHudTop());
+}
 
 const soundBtn = document.querySelector('#btn-sound');
 soundBtn.addEventListener('click', async () => {
@@ -937,21 +942,13 @@ function afterHang() {
 
 // ── 점등 영상 ──
 const recorder = createRecorder(canvas, () => (sound.enabled ? sound.stream() : null), () => showVideoButton());
+async function saveIgniteVideo() {
+  if (!recorder.blob) return;
+  const r = await saveVideo(recorder.blob, `today-hero.${recorder.ext}`);
+  if (r === 'downloaded') setStatus('점등 영상을 저장했어요. 스토리에 올려보세요');
+}
 function showVideoButton() {
-  let btn = document.querySelector('#btn-video');
-  if (!btn) {
-    btn = document.createElement('button');
-    btn.id = 'btn-video';
-    btn.className = 'btn';
-    btn.textContent = '점등 영상 저장';
-    document.querySelector('.actions').prepend(btn);
-    btn.addEventListener('click', async () => {
-      if (!recorder.blob) return;
-      const r = await saveVideo(recorder.blob, `saengil-oksang.${recorder.ext}`);
-      if (r === 'downloaded') setStatus('점등 영상을 저장했어요. 스토리에 올려보세요');
-    });
-  }
-  setStatus('점등 영상이 준비됐어요. 저장해서 스토리에 올려보세요', 6000);
+  setStatus("점등 영상이 준비됐어요. '사진·영상'에서 저장해 스토리에 올려보세요", 6000);
 }
 
 // ── 점등 알림: 휴대폰 알림(30분·5분 전) 또는 캘린더 ──
@@ -1032,6 +1029,30 @@ async function refreshLanterns() {
   } catch { /* 다음 이벤트 때 다시 */ }
 }
 
+// ── 오른쪽 위 버튼: 자주 쓰는 것만 바로 보이고 나머지는 '메뉴'에 모은다(작은 휴대폰에서 아래 버튼과 겹치지 않게) ──
+const MENU_BUTTONS = new Set(['btn-manage', 'btn-group', 'btn-lite']);
+function topMenu() {
+  let panel = document.querySelector('#top-more');
+  if (panel) return panel;
+  const wrap = document.createElement('div');
+  wrap.className = 'top-more-wrap';
+  wrap.innerHTML = '<button id="btn-more" class="icon-btn" aria-expanded="false" aria-controls="top-more"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg><span>메뉴</span></button><div id="top-more" hidden></div>';
+  document.querySelector('.top-right').appendChild(wrap);
+  panel = wrap.querySelector('#top-more');
+  const more = wrap.querySelector('#btn-more');
+  const setOpen = (open) => { panel.hidden = !open; more.setAttribute('aria-expanded', String(open)); };
+  more.addEventListener('click', (e) => { e.stopPropagation(); setOpen(panel.hidden); });
+  panel.addEventListener('click', (e) => { if (e.target.closest('button')) setOpen(false); });
+  document.addEventListener('pointerdown', (e) => { if (!panel.hidden && !wrap.contains(e.target)) setOpen(false); });
+  return panel;
+}
+function placeTopButton(btn) {
+  if (MENU_BUTTONS.has(btn.id)) { topMenu().appendChild(btn); return; }
+  const right = document.querySelector('.top-right');
+  const wrap = right.querySelector('.top-more-wrap');
+  if (wrap) right.insertBefore(btn, wrap); else right.appendChild(btn);
+}
+
 // ── 만든 사람의 관리 화면 ──
 function addManageButton() {
   if (document.querySelector('#btn-manage')) return;
@@ -1039,7 +1060,7 @@ function addManageButton() {
   btn.id = 'btn-manage';
   btn.className = 'icon-btn';
   btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg><span>현황·관리</span>';
-  document.querySelector('.top-right').appendChild(btn);
+  placeTopButton(btn);
   btn.addEventListener('click', openManage);
 }
 
@@ -1228,7 +1249,7 @@ function addTopButton(id, label, svg, onClick) {
   btn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${svg}</svg><span>${label}</span>`;
   btn.setAttribute('aria-label', label);
   btn.title = label;
-  document.querySelector('.top-right').appendChild(btn);
+  placeTopButton(btn);
   btn.addEventListener('click', onClick);
   return btn;
 }
@@ -1310,12 +1331,10 @@ function addCandleButton() {
     } catch (err) { setStatus(err.message); btn.disabled = false; }
   });
 }
-// ── 캐릭터 동작: 점프·앉기·춤 등 15가지. 모두의 화면에서 같이 보인다 ──
+// ── 캐릭터 동작: 자주 쓰는 6가지만 판에 보인다(다른 동작도 받으면 그대로 재생). 모두의 화면에서 같이 보인다 ──
 const EMOTES = [
-  ['hop', '점프'], ['sit', '앉기'], ['wave', '손 흔들기'], ['dance', '춤추기'], ['bow', '꾸벅 인사'],
-  ['flip', '공중제비'], ['spin', '빙글빙글'], ['cheer', '만세'], ['wiggle', '엉덩이춤'], ['surprise', '깜짝'],
-  ['cry', '감동'], ['stretch', '기지개'], ['lie', '벌러덩'], ['sleep', '졸기'], ['heart', '하트'],
-  ['eat', '냠냠'], ['cheers', '건배'],
+  ['wave', '손 흔들기'], ['hop', '점프'], ['dance', '춤추기'],
+  ['cheer', '만세'], ['heart', '하트'], ['cheers', '건배'],
 ];
 const POSES = new Set(['sit', 'lie', 'sleep', 'dance']);
 function playEmote(person, kind) {
@@ -1356,7 +1375,7 @@ function wireEmotes() {
     const near = me ? nearbyFor(me, 7).length : 0;
     panel.innerHTML = `${EMOTES.map(([k, n]) => `<button type="button" data-emote="${k}">${n}</button>`).join('')}
       <p class="emote-sub">같이 하기 · 근처 친구 ${near}명</p>
-      ${Object.entries(GROUP_MOTIONS).map(([k, [n, min]]) => `<button type="button" class="gm" data-gm="${k}"${near + 1 < min ? ' disabled' : ''}>${n}</button>`).join('')}`;
+      ${GM_MENU.map((k) => [k, GROUP_MOTIONS[k]]).map(([k, [n, min]]) => `<button type="button" class="gm" data-gm="${k}"${near + 1 < min ? ' disabled' : ''}>${n}</button>`).join('')}`;
   };
   document.body.appendChild(panel);
   open.addEventListener('click', () => { if (panel.hidden) renderPanel(); panel.hidden = !panel.hidden; });
@@ -1372,6 +1391,8 @@ function wireEmotes() {
 }
 // ── 같이 하는 동작: 근처 친구와 하이파이브·포옹·빙글빙글·기차놀이·단체 셀카 ──
 // 시작한 사람이 근처 사람을 모으고, 서버가 정한 같은 시각부터 모두의 화면에서 같은 안무를 한다.
+// 판에는 3가지만 보인다(빙글빙글·기차놀이도 받으면 그대로 함께 한다)
+const GM_MENU = ['highfive', 'hug', 'selfie'];
 const GROUP_MOTIONS = { highfive: ['하이파이브', 2, 2.2], hug: ['포옹', 2, 2.8], ring: ['손잡고 빙글빙글', 3, 6.4], conga: ['기차놀이', 3, 7.4], selfie: ['단체 셀카', 2, 3.4] };
 const GM_RANGE = 3.2;
 function nearbyFor(person, max) {
@@ -2184,6 +2205,7 @@ async function finishGroupPhoto(shot, title = null) {
     if (r === 'downloaded') setStatus('단체 사진을 저장했어요');
   });
 }
+let lastPhotoReq = 0;
 function canStartPhoto() { return MODE === 'demo' || ROOF_STATE.isOwner || ROOF_STATE.role === 'host'; }
 function wireGroupPhotoButton() {
   if (!canStartPhoto()) return;
@@ -2191,6 +2213,8 @@ function wireGroupPhotoButton() {
     if (ignite || song || ceremony || candleBlow) return setStatus('지금은 찍을 수 없어요. 잠시 후 다시 눌러주세요');
     if (MODE === 'demo') return startGroupPhoto(Date.now() + 5000);
     if (!conn) return setStatus('연결된 뒤에 찍을 수 있어요');
+    if (Date.now() - lastPhotoReq < 15000) return setStatus('방금 찍었어요. 조금 뒤에 다시 찍을 수 있어요');
+    lastPhotoReq = Date.now();
     conn.send({ t: 'photo' });
   });
 }
@@ -2235,18 +2259,33 @@ async function savePhoto() {
   });
   if (!blob) return setStatus('사진을 만들지 못했어요. 다시 눌러주세요.');
   track('photo_save');
-  const r = await saveVideo(blob, 'saengil-oksang-photo.jpg');
+  const r = await saveVideo(blob, 'today-hero-photo.jpg');
   sound.shutter();
   if (r === 'downloaded') setStatus('기념사진을 저장했어요. 단톡방이나 스토리에 올려보세요');
+  if (r !== 'cancelled' && MODE === 'room' && !ROOF_STATE.isOwner) setTimeout(showCta, 1500); // 사진을 남긴 순간에 '내 파티도' 안내
 }
+// 점등 뒤 하단 버튼이 두 줄로 넘치지 않게: 기념사진·점등 영상·기억 카드·점등 다시 보기를 '사진·영상' 하나로 모은다
 function addPhotoButton() {
+  igniteBtn.hidden = true;
+  document.querySelector('#btn-calendar')?.remove(); // 점등이 끝났으니 점등 알림은 필요 없다
   if (document.querySelector('#btn-photo')) return;
   const btn = document.createElement('button');
   btn.id = 'btn-photo';
   btn.className = 'btn';
-  btn.textContent = '기념사진';
+  btn.textContent = '사진·영상';
   document.querySelector('.actions').prepend(btn);
-  btn.addEventListener('click', savePhoto);
+  btn.addEventListener('click', openKeepsakes);
+}
+function openKeepsakes() {
+  openSheet(`<h2>추억 남기기</h2><p class="sheet-lead">파티장은 다음 날 닫혀요. 사진과 영상을 저장해 두세요.</p>
+    <button class="btn primary wide" id="keep-photo">기념사진 저장</button>
+    ${recorder.blob ? '<button class="btn wide" id="keep-video">점등 영상 저장</button>' : ''}
+    ${lanterns.length ? '<button class="btn wide" id="keep-card">기억 카드 저장 (등불 문구 모음)</button>' : ''}
+    <button class="btn wide" id="keep-replay">점등 다시 보기</button>`);
+  sheetBody.querySelector('#keep-photo').addEventListener('click', savePhoto);
+  sheetBody.querySelector('#keep-video')?.addEventListener('click', saveIgniteVideo);
+  sheetBody.querySelector('#keep-card')?.addEventListener('click', (e) => saveMemoryCard(e.currentTarget));
+  sheetBody.querySelector('#keep-replay').addEventListener('click', () => { closeSheet(); startIgnite({ replay: true }); });
 }
 
 // ── 친구 초대(공유) ──
@@ -2268,9 +2307,12 @@ function showCta() {
   const el = document.querySelector('#cta');
   if (!el || ROOF_STATE.ctaDismissed) return;
   el.hidden = false;
+  document.body.classList.add('cta-on');
   el.querySelector('a').href = MODE === 'room' ? `/?ref=${ROOM_ID}` : '/';
+  clearTimeout(showCta.timer);
+  showCta.timer = setTimeout(hideCta, 20000);
 }
-function hideCta() { const el = document.querySelector('#cta'); if (el) el.hidden = true; }
+function hideCta() { const el = document.querySelector('#cta'); if (el) el.hidden = true; document.body.classList.remove('cta-on'); }
 document.querySelector('#cta [data-close]')?.addEventListener('click', () => { ROOF_STATE.ctaDismissed = true; hideCta(); });
 document.querySelector('#cta a')?.addEventListener('click', () => track('cta_click'));
 
@@ -2528,7 +2570,7 @@ async function startRoom() {
   setInterval(tick, 1000);
 
   const before = serverNow() < ROOF_STATE.igniteAt;
-  igniteBtn.hidden = before;
+  igniteBtn.hidden = true; // 점등 뒤 '점등 다시 보기'는 '사진·영상' 안에 있다
   igniteBtn.textContent = '점등 다시 보기';
   igniteBtn.addEventListener('click', () => startIgnite({ replay: true }));
 
@@ -3018,6 +3060,7 @@ window.__lantern = {
     const crew = [me, ...people.filter((p) => p.npc)].slice(0, n + 1);
     crew.forEach((p, i) => { const a = (i / crew.length) * Math.PI * 2; const r = i === 0 ? 0 : gap; p.target = null; p.goal = null; p.wait = 60; p.emoteT = 60; p.av.root.position.set(cx + Math.cos(a) * r, 0, cz + Math.sin(a) * r); if (pose) p.av.pose = pose; });
   },
+  moveMe(x, z) { if (me) { me.av.root.position.set(x, 0, z); me.target = null; } },
   get mePos() { return me ? { x: me.av.root.position.x, y: me.av.lift, z: me.av.root.position.z } : null; },
   // 영상 촬영용: 카메라를 두 지점 사이로 천천히 움직이기, 등불이 날아와 걸리기
   cine(p0, l0, p1, l1, ms, fov) { cineCam = { p0: new THREE.Vector3(...p0), l0: new THREE.Vector3(...l0), p1: new THREE.Vector3(...p1), l1: new THREE.Vector3(...l1), start: performance.now(), ms, fov }; },

@@ -706,8 +706,8 @@ server.on('upgrade', (req, socket, head) => {
         if (now - peer.lastHop < 1000) return; // 도배 방지
         peer.lastHop = now;
         broadcast(roof.id, { t: 'hop', id: peer.id }, peer.id);
-      } else if (msg.t === 'photo' && peer.joined && (isOwner || isHost) && doorOpen(roof)) {
-        // 단체 사진: 주인공(또는 만든 사람)이 누르면 5초 뒤 모두의 화면에서 같은 순간을 찍는다
+      } else if (msg.t === 'photo' && peer.joined && (isHost || (isOwner && doorOpen(roof)))) {
+        // 단체 사진: 만든 사람은 언제든(주인공 오기 전 친구들끼리도), 주인공은 입장한 뒤에. 5초 뒤 모두의 화면에서 같은 순간을 찍는다
         const now = Date.now();
         if (now - (photoAt.get(roof.id) || 0) < 15_000) return;
         photoAt.set(roof.id, now);
