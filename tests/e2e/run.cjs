@@ -110,8 +110,8 @@ const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
     log('5. 주인공: 촛불 끄기, 답례');
     await owner.click('#btn-candles');
-    await f1.waitForFunction(() => window.__lantern.candlesOut, null, { timeout: 20000 });
-    ok(true, '주인공이 촛불을 끄자 친구 화면에서도 꺼짐');
+    await f1.waitForFunction(() => window.__lantern.candlesOut, null, { timeout: 45000 });
+    ok(true, '주인공이 촛불을 끄자 생일 노래 뒤 친구 화면에서도 꺼짐');
     await owner.click('#btn-letters');
     await owner.waitForSelector('[data-thanks]');
     await owner.click('[data-thanks="0"]');

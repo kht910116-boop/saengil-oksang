@@ -80,6 +80,43 @@ test('파티 장소와 의상: 목록에 있는 것만', async () => {
   w2.close();
 });
 
+test('단체 사진: 주인공만, 문이 열린 뒤에만, 도배 방지', async () => {
+  const { data: roof } = await create({ testSeconds: 1 });
+  await new Promise((r) => setTimeout(r, 1100));
+  const open = (q) => new Promise((resolve) => {
+    const ws = new WebSocket(`ws://localhost:${PORT}/ws?room=${roof.id}${q}`);
+    ws.msgs = [];
+    ws.on('message', (raw) => { const m = JSON.parse(raw); ws.msgs.push(m); if (m.t === 'welcome') resolve(ws); });
+    ws.on('open', () => ws.send(JSON.stringify({ t: 'join', name: '수아', color: gold })));
+  });
+  const friend = await open('');
+  const owner = await open(`&k=${roof.ownerKey}`);
+  friend.send(JSON.stringify({ t: 'photo' }));
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(friend.msgs.filter((m) => m.t === 'photo').length, 0, '친구는 단체 사진을 시작할 수 없음');
+  owner.send(JSON.stringify({ t: 'photo' }));
+  owner.send(JSON.stringify({ t: 'photo' }));
+  await new Promise((r) => setTimeout(r, 250));
+  const got = friend.msgs.filter((m) => m.t === 'photo');
+  assert.equal(got.length, 1, '연달아 눌러도 한 번만');
+  assert.ok(got[0].at > Date.now(), '모두가 같은 시각에 찍도록 미래 시각');
+  friend.close();
+  owner.close();
+});
+
+test('점등 알림: 키 공개, 구독 검사, 파티장과 함께 삭제', async () => {
+  const key = await call('GET', '/api/push/key');
+  assert.equal(key.status, 200);
+  assert.ok(key.data.key.length > 40);
+  const { data: roof } = await create();
+  const sub = { endpoint: 'https://push.example.com/send/abcdefghijklmnop', keys: { p256dh: 'B'.repeat(87), auth: 'a'.repeat(22) } };
+  assert.equal((await call('POST', `/api/rooftops/${roof.id}/push`, { sub: { endpoint: 'http://evil' } })).status, 400);
+  assert.equal((await call('POST', `/api/rooftops/${roof.id}/push`, { sub })).status, 201);
+  assert.equal((await call('POST', `/api/rooftops/${roof.id}/push`, { sub, k: roof.ownerKey })).status, 201, '같은 기기는 한 번만 저장(중복 무시)');
+  assert.equal((await call('DELETE', `/api/rooftops/${roof.id}`, { h: roof.hostKey })).status, 200);
+  assert.equal((await call('POST', `/api/rooftops/${roof.id}/push`, { sub })).status, 404);
+});
+
 test('등불: 문구 번호만, 관계·햇수, 이름 필터', async () => {
   const { data: roof } = await create();
   const ok = await call('POST', `/api/rooftops/${roof.id}/lanterns`, { name: '하은', tpl: 2, color: gold, rel: 0, years: 10 });
@@ -107,7 +144,9 @@ test('주인공 답례·촛불: 주인공만, 점등 뒤에만', async () => {
   const { data: roof } = await create({ testSeconds: 1 });
   await new Promise((r) => setTimeout(r, 1200));
   assert.equal((await call('POST', `/api/rooftops/${roof.id}/candles`, {})).status, 403);
-  assert.equal((await call('POST', `/api/rooftops/${roof.id}/candles`, { k: roof.ownerKey })).status, 200);
+  const blow = await call('POST', `/api/rooftops/${roof.id}/candles`, { k: roof.ownerKey });
+  assert.equal(blow.status, 200);
+  assert.ok(blow.data.songAt > Date.now(), '촛불 끄기 전에 생일 노래 시작 시각을 알려줌');
   assert.equal((await call('POST', `/api/rooftops/${roof.id}/thanks`, { k: roof.ownerKey, tpl: 1 })).status, 200);
   const view = (await call('GET', `/api/rooftops/${roof.id}`)).data;
   assert.equal(view.candlesOut, true);

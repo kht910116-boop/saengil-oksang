@@ -1,3 +1,5 @@
+import { MELODY, BASS, BEAT, LEAD_IN, SONG_SECONDS } from './song.js';
+
 // 효과음은 코드로 합성하고, BGM은 public/audio/ 의 mp3 파일을 상황별로 튼다(BGM_GUIDE.md 참고).
 let ctx = null;
 let master = null;
@@ -178,6 +180,26 @@ export const sound = {
     const t = ctx.currentTime;
     const scale = [523, 587, 659, 784, 880, 1047];
     tone(scale[i % scale.length] * (i % 12 < 6 ? 1 : 1.5), t, 0.35, { type: 'triangle', gain: 0.06 });
+  },
+  // 생일 축하 노래 반주(오르골 소리). delay초 뒤에 시작하고, 그동안 배경 음악은 작게 줄인다.
+  birthdaySong(delay = 0) {
+    if (!on) return;
+    const t0 = ctx.currentTime + Math.max(0, delay) + LEAD_IN * BEAT;
+    const bgm = wanted && players[wanted];
+    if (bgm) {
+      fade(bgm, TRACKS[wanted].volume * 0.15, 600);
+      setTimeout(() => { if (on && players[wanted] === bgm) fade(bgm, TRACKS[wanted].volume, 1500); }, (delay + SONG_SECONDS + 0.5) * 1000);
+    }
+    // 준비 박: 똑, 똑
+    for (let i = 0; i < LEAD_IN; i++) tone(1760, t0 - (LEAD_IN - i) * BEAT, 0.08, { type: 'square', gain: 0.03 });
+    let b = 0;
+    for (const [f, len] of MELODY) {
+      const t = t0 + b * BEAT;
+      tone(f, t, Math.max(0.5, len * BEAT * 1.6), { type: 'triangle', gain: 0.13 });
+      tone(f * 2, t, 0.5, { type: 'sine', gain: 0.035 });
+      b += len;
+    }
+    for (const [at, f] of BASS) tone(f, t0 + at * BEAT, BEAT * 2.6, { type: 'sine', gain: 0.12 });
   },
   swell() {
     if (!on) return;

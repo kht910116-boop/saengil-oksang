@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
 import { WebSocketServer } from 'ws';
+import { createPush } from './push.js';
 import { SERVICE_NAME, MAX_LANTERNS, OWNER_EARLY_MS, RETENTION_DAYS, REPORT_HIDE_THRESHOLD, renderTemplate, validateName, GIFT_ITEMS, PAYMENT_MODE,
   nextReveal, revealLabel, LANTERN_RELATIONS, MAX_YEARS, THANKS_TEMPLATES,
   closeAt, MAX_ROOFTOPS_PER_DAY, MAX_DAYS_AHEAD, VENUES, DEFAULT_VENUE, OUTFITS, DEFAULT_OUTFIT } from '../src/config.js';
@@ -83,6 +84,7 @@ addColumn('rooftops', 'thanks', 'INTEGER NOT NULL DEFAULT -1');
 addColumn('rooftops', 'candles_out', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('rooftops', 'end_at', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('rooftops', 'venue', "TEXT NOT NULL DEFAULT 'rooftop'");
+addColumn('rooftops', 'owner_seen', 'INTEGER NOT NULL DEFAULT 0');
 // 이전 파티장들에도 닫는 시각을 채운다
 for (const r of db.prepare('SELECT id, ignite_at FROM rooftops WHERE end_at = 0').all()) db.prepare('UPDATE rooftops SET end_at = ? WHERE id = ?').run(closeAt(r.ignite_at), r.id);
 db.exec(`
@@ -90,12 +92,15 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS client_errors (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, msg TEXT NOT NULL, place TEXT NOT NULL, ua TEXT NOT NULL);
 `);
 
+const push = createPush(db, { dataDir: path.dirname(DB_PATH), serviceName: SERVICE_NAME });
+
 const q = {
   insertRoof: db.prepare('INSERT INTO rooftops (id, owner, ignite_at, owner_key, host_key, created_at, ref, reveal_hour, end_at, venue) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
   ended: db.prepare('SELECT id FROM rooftops WHERE end_at > 0 AND end_at <= ?'),
   metricToday: db.prepare('SELECT n FROM metrics WHERE day = ? AND type = ?'),
   setThanks: db.prepare('UPDATE rooftops SET thanks = ? WHERE id = ?'),
   setCandles: db.prepare('UPDATE rooftops SET candles_out = 1 WHERE id = ?'),
+  setOwnerSeen: db.prepare('UPDATE rooftops SET owner_seen = ? WHERE id = ? AND owner_seen = 0'),
   metric: db.prepare('INSERT INTO metrics (day, type, n) VALUES (?, ?, 1) ON CONFLICT(day, type) DO UPDATE SET n = n + 1'),
   metricsSince: db.prepare('SELECT day, type, n FROM metrics WHERE day >= ? ORDER BY day DESC'),
   insertError: db.prepare('INSERT INTO client_errors (at, msg, place, ua) VALUES (?, ?, ?, ?)'),
@@ -136,7 +141,7 @@ function count(type) {
   try { q.metric.run(kstDay(), type); } catch { /* 측정 실패는 서비스에 영향 없음 */ }
 }
 const CLIENT_EVENTS = new Set(['landing_visit', 'venue_preview', 'demo_visit', 'friend_visit', 'owner_door', 'owner_enter', 'ignite_seen', 'letters_open',
-  'share_click', 'cta_click', 'photo_save', 'video_save', 'calendar_click', 'react', 'inapp_open_external', 'webgl_fail']);
+  'share_click', 'cta_click', 'photo_save', 'video_save', 'calendar_click', 'react', 'inapp_open_external', 'webgl_fail', 'group_photo_save', 'memory_save']);
 
 function clean(s, max) {
   return String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max);
@@ -208,6 +213,10 @@ function roofView(roof, role) {
     body.lanterns = q.allLanterns.all(roof.id);
     body.ownerKey = roof.owner_key;
     body.hostKey = roof.host_key;
+    // 준비 현황판: 주인공이 링크를 열어봤는지, 지금 몇 명이 와 있는지
+    body.ownerSeen = roof.owner_seen || 0;
+    const room = rooms.get(roof.id);
+    body.online = room ? [...room.values()].filter((p) => p.joined).length : 0;
   } else if (role === 'owner' && !doorOpen(roof)) {
     // 주인공에게는 문이 열리기 전까지 등불 내용을 숨기고 개수만 알려준다
     body.lanterns = [];
@@ -294,7 +303,7 @@ function serveStatic(req, res, url) {
   const ext = path.extname(file);
   const headers = {
     'content-type': MIME[ext] || 'application/octet-stream',
-    'cache-control': pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'public, max-age=3600',
+    'cache-control': pathname.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : pathname === '/sw.js' ? 'no-cache' : 'public, max-age=3600',
   };
   if (COMPRESSIBLE.has(ext)) {
     // 작은 글자 파일: 읽어서 압축(결과는 기억)
@@ -392,6 +401,8 @@ function deleteRoof(roofId, closeCode = 4003) {
   q.deleteReportsOfRoof.run(roofId);
   q.deleteRoofLanterns.run(roofId);
   q.deleteRoof.run(roofId);
+  photoAt.delete(roofId);
+  push.removeRoof(roofId);
   const room = rooms.get(roofId);
   if (room) for (const p of room.values()) p.ws.close(closeCode, closeCode === 4004 ? 'ended' : 'deleted');
 }
@@ -450,6 +461,21 @@ const server = http.createServer(async (req, res) => {
     }
 
     // 파티장 선물 보내기
+    // 점등 알림(웹 푸시)
+    if (req.method === 'GET' && url.pathname === '/api/push/key') return json(res, 200, { key: push.publicKey });
+    const pm = url.pathname.match(/^\/api\/rooftops\/([\w-]{4,16})\/push$/);
+    if (pm && (req.method === 'POST' || req.method === 'DELETE')) {
+      const roof = q.getRoof.get(pm[1]);
+      if (!roof) return json(res, 404, { error: '파티장을 찾을 수 없어요.' });
+      const b = await readBody(req);
+      if (req.method === 'DELETE') { push.unsubscribe(roof.id, b.endpoint); return json(res, 200, { ok: true }); }
+      if (roof.ignite_at <= Date.now()) return json(res, 400, { error: '이미 점등이 지났어요.' });
+      if (limited(ip, 'push', 20, 600_000)) return json(res, 429, { error: '잠시 후 다시 시도해주세요.' });
+      const r = push.subscribe(roof.id, b.sub, roleOf(roof, b));
+      if (!r.ok) return json(res, 400, { error: r.error });
+      count('push_subscribe');
+      return json(res, 201, { ok: true });
+    }
     const gm = url.pathname.match(/^\/api\/rooftops\/([\w-]{4,16})\/gifts$/);
     if (gm && req.method === 'POST') {
       const roof = q.getRoof.get(gm[1]);
@@ -494,9 +520,13 @@ const server = http.createServer(async (req, res) => {
         count('thanks_sent');
         return json(res, 200, { ok: true, text: THANKS_TEMPLATES[tpl] });
       }
-      if (!roof.candles_out) { q.setCandles.run(roof.id); count('candles_blown'); }
-      broadcast(roof.id, { t: 'candles' });
-      return json(res, 200, { ok: true });
+      if (roof.candles_out) return json(res, 200, { ok: true });
+      q.setCandles.run(roof.id);
+      count('candles_blown');
+      // 모두의 화면에서 같은 박자로 생일 노래를 부른 뒤 촛불이 꺼진다
+      const songAt = Date.now() + 1500;
+      broadcast(roof.id, { t: 'candles', songAt });
+      return json(res, 200, { ok: true, songAt });
     }
 
     // 화면에서 보내는 측정 이벤트(종류만, 개인 정보 없음)
@@ -523,7 +553,9 @@ const server = http.createServer(async (req, res) => {
       const isLanternPath = url.pathname.includes('/lanterns');
 
       if (req.method === 'GET' && !isLanternPath) {
-        return json(res, 200, roofView(roof, roleOf(roof, { k: url.searchParams.get('k'), h: url.searchParams.get('h') })));
+        const role = roleOf(roof, { k: url.searchParams.get('k'), h: url.searchParams.get('h') });
+        if (role === 'owner' && !roof.owner_seen) q.setOwnerSeen.run(Date.now(), roof.id);
+        return json(res, 200, roofView(roof, role));
       }
 
       if (req.method === 'DELETE' && !isLanternPath) {
@@ -629,6 +661,7 @@ server.on('upgrade', (req, socket, head) => {
   if (!roof) return socket.destroy();
   const role = roleOf(roof, { k: url.searchParams.get('k'), h: url.searchParams.get('h') });
   const isOwner = role === 'owner';
+  const isHost = role === 'host';
   wss.handleUpgrade(req, socket, head, (ws) => {
     if (isOwner && !doorOpen(roof)) return ws.close(4001, 'locked');
     const room = rooms.get(roof.id) || new Map();
@@ -667,6 +700,13 @@ server.on('upgrade', (req, socket, head) => {
         if (now - peer.lastHop < 1000) return; // 도배 방지
         peer.lastHop = now;
         broadcast(roof.id, { t: 'hop', id: peer.id }, peer.id);
+      } else if (msg.t === 'photo' && peer.joined && (isOwner || isHost) && doorOpen(roof)) {
+        // 단체 사진: 주인공(또는 만든 사람)이 누르면 5초 뒤 모두의 화면에서 같은 순간을 찍는다
+        const now = Date.now();
+        if (now - (photoAt.get(roof.id) || 0) < 15_000) return;
+        photoAt.set(roof.id, now);
+        count('group_photo');
+        broadcast(roof.id, { t: 'photo', at: now + 5000 });
       } else if (msg.t === 'react' && peer.joined && REACTIONS.has(msg.kind)) {
         const now = Date.now();
         if (now - peer.lastReact < 700) return; // 도배 방지
@@ -689,6 +729,7 @@ function view(p) {
   return { id: p.id, name: p.name, color: p.color, hat: p.hat, outfit: p.outfit, x: p.x, z: p.z, owner: p.isOwner };
 }
 const REACTIONS = new Set(['clap', 'heart', 'party']);
+const photoAt = new Map(); // 파티장별 마지막 단체 사진 시각(도배 방지)
 function avatarCount(room) {
   let n = 0;
   for (const p of room.values()) if (p.joined && !p.spectator) n++;
@@ -727,6 +768,7 @@ function closeEnded() {
 }
 closeEnded();
 setInterval(closeEnded, Number(process.env.CLOSE_CHECK_MS) || 60_000).unref(); // 시험에서는 더 짧게
+setInterval(() => push.tick().catch((e) => console.warn('알림 확인 실패', e.message)), Number(process.env.PUSH_CHECK_MS) || 20_000).unref();
 
 // 오늘(한국 시간) 더 만들 수 있는 파티장 수
 function capacity() {

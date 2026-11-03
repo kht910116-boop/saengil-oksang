@@ -16,6 +16,8 @@ window.addEventListener('error', (e) => reportError(`${e.message} @${(e.filename
 window.addEventListener('unhandledrejection', (e) => reportError(`promise: ${e.reason?.message || e.reason}`));
 import { LANTERN_TEMPLATES, renderTemplate, GIFT_ITEMS, PAYMENT_MODE, josa, validateName, revealLabel, LANTERN_RELATIONS, MAX_YEARS, THANKS_TEMPLATES, GOAL_LANTERNS, VENUES, DEFAULT_VENUE, BRAND, OUTFITS, DEFAULT_OUTFIT } from './config.js';
 import { createGiftLayer } from './gifts.js';
+import { composeMemoryCard } from './memory.js';
+import { songLines, BEAT, LEAD_IN, SONG_BEATS } from './song.js';
 import './style.css';
 
 // ── 경로: / 파티장 만들기 · /r/demo 샘플 · /r/:id 실제 파티장 ──
@@ -130,7 +132,7 @@ composer.addPass(bloomPass);
 // 느린 기기에서는 해상도를 낮추고 빛 번짐을 끈다
 const perf = { sum: 0, n: 0, level: 0 };
 function adaptQuality(dt) {
-  if (perf.level >= 2 || ignite) return; // 점등(녹화) 중에는 해상도를 바꾸지 않는다
+  if (perf.level >= 3 || ignite || lite) return; // 점등(녹화) 중에는 해상도를 바꾸지 않는다
   perf.sum += dt;
   perf.n += 1;
   if (perf.n < 90) return;
@@ -141,6 +143,11 @@ function adaptQuality(dt) {
     perf.level += 1;
     if (perf.level === 1) renderer.setPixelRatio(1);
     if (perf.level === 2) bloomPass.enabled = false;
+    // 그래도 버벅이면 가볍게 보기를 권한다(한 번만)
+    if (perf.level === 3 && !sheet.classList.contains('open') && !song && !procession && !groupPhoto && MODE !== 'landing') {
+      openSheet('<h2>화면이 버벅이나요?</h2><p class="sheet-lead">이 휴대폰에서는 3D 화면이 무거울 수 있어요. 가볍게 보기로 바꾸면 등불 목록과 점등 소식만 보여요. 등불 달기와 선물은 그대로 할 수 있어요.</p><button class="btn primary wide" id="go-lite">가볍게 보기로 바꾸기</button>');
+      sheetBody.querySelector('#go-lite').addEventListener('click', () => { closeSheet(); setLite(true); track('lite_on'); });
+    }
     resize();
   }
 }
@@ -568,7 +575,7 @@ function startIgnite() {
   ignitedThisSession = true;
   document.body.classList.add('is-igniting');
   sound.music('midnight', 'rooftop');
-  recorder.start();
+  if (!lite) recorder.start();
   track('ignite_seen');
   document.querySelector('#goal').hidden = true;
   hideCta();
@@ -777,10 +784,10 @@ function checkClosing() {
     banner.hidden = false;
     const d = new Date(ROOF_STATE.endAt + KST);
     const closeTime = `${d.getUTCHours()}시${d.getUTCMinutes() ? ` ${d.getUTCMinutes()}분` : ''}`;
-    banner.textContent = left <= 600_000 ? `파티장이 ${mmss(Math.floor(left / 1000))} 뒤에 닫혀요. 기념사진을 저장해 두세요` : `이 파티장은 ${closeTime}에 닫혀요. 등불과 선물도 함께 사라져요`;
+    banner.textContent = left <= 600_000 ? `파티장이 ${mmss(Math.floor(left / 1000))} 뒤에 닫혀요. 기억 카드와 기념사진을 저장해 두세요` : `이 파티장은 ${closeTime}에 닫혀요. 등불과 선물도 함께 사라져요`;
     if (!closeNoticeShown) {
       closeNoticeShown = true;
-      setStatus('파티장이 곧 닫혀요. 닫히면 등불과 선물이 모두 사라지니 기념사진을 저장해 두세요', 7000);
+      setStatus('파티장이 곧 닫혀요. 닫히면 등불과 선물이 모두 사라지니 등불 모아보기에서 기억 카드를 저장해 두세요', 7000);
     }
   }
 }
@@ -791,10 +798,12 @@ function showEnded() {
   conn?.close();
   openSheet(`
     <h2>파티장이 닫혔어요</h2>
-    <p class="sheet-lead">${esc(ROOF_STATE.owner)}의 생일 파티이 끝났어요. 함께해 준 모든 분께 고마워요. 등불과 선물은 약속대로 모두 지웠어요.</p>
+    <p class="sheet-lead">${esc(ROOF_STATE.owner)}의 생일 파티가 끝났어요. 함께해 준 모든 분께 고마워요. 등불과 선물은 약속대로 모두 지웠어요.</p>
+    ${lanterns.length ? '<button class="btn wide" id="ended-memory">기억 카드 저장 (등불 전부 한 장에)</button>' : ''}
     ${photoShot ? '<button class="btn wide" id="ended-photo">기념사진 저장</button>' : ''}
     <a class="btn primary wide" id="ended-cta" href="/?ref=${esc(ROOM_ID || '')}">내 생일 파티 만들기</a>`, { locked: true });
   sheetBody.querySelector('#ended-photo')?.addEventListener('click', savePhoto);
+  sheetBody.querySelector('#ended-memory')?.addEventListener('click', (e) => saveMemoryCard(e.currentTarget));
   sheetBody.querySelector('#ended-cta').addEventListener('click', () => track('cta_click'));
 }
 
@@ -867,24 +876,73 @@ function showVideoButton() {
   setStatus('점등 영상이 준비됐어요. 저장해서 스토리에 올려보세요', 6000);
 }
 
-// ── 자정 알림(캘린더) ──
+// ── 점등 알림: 휴대폰 알림(30분·5분 전) 또는 캘린더 ──
+const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const IS_STANDALONE = window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
+function pushSupported() { return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window; }
+function b64ToBytes(b64) {
+  const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+async function subscribePush() {
+  const reg = await navigator.serviceWorker.register('/sw.js');
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') throw new Error('알림이 꺼져 있어요. 브라우저 설정에서 이 사이트의 알림을 허용해 주세요.');
+  const { key } = await api('/api/push/key');
+  const sub = (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(key) }));
+  await api(`/api/rooftops/${ROOM_ID}/push`, { method: 'POST', body: { sub: sub.toJSON(), ...authBody() } });
+  store.set(`push:${ROOM_ID}`, true);
+}
+function downloadCalendar() {
+  const blob = calendarFile({ title: `${ROOF_STATE.owner}의 생일 파티 점등`, url: `${location.origin}/r/${ROOM_ID}`, at: ROOF_STATE.igniteAt });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'today-hero-ignite.ics';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+  track('calendar_click');
+}
+function openReminder() {
+  const done = store.get(`push:${ROOM_ID}`);
+  const iosGuide = IS_IOS && !IS_STANDALONE;
+  const pushPart = done
+    ? '<p class="sheet-lead">이 기기로 점등 30분 전, 5분 전에 알림이 와요.</p>'
+    : iosGuide
+      ? '<div class="link-card"><p class="link-title">아이폰에서 알림 받기</p><p class="link-desc">아이폰은 홈 화면에 추가한 뒤에만 알림을 받을 수 있어요. 아래쪽 공유 버튼 → "홈 화면에 추가"를 누르고, 홈 화면의 "오늘의 주인공"으로 다시 열어서 이 버튼을 눌러주세요. (iOS 16.4 이상)</p></div>'
+      : pushSupported()
+        ? '<button class="btn primary wide" id="push-on">휴대폰 알림 받기 (점등 30분·5분 전)</button>'
+        : '<p class="sheet-lead">이 브라우저는 알림을 지원하지 않아요. 캘린더에 넣어 두세요.</p>';
+  openSheet(`<h2>점등 알림</h2><p class="sheet-lead">${revealLabel(ROOF_STATE.igniteAt)}에 다 같이 불을 켜요. 잊지 않게 알려드릴게요.</p>
+    ${pushPart}
+    <button class="btn wide" id="cal-on">캘린더에 넣기 (10분 전 알림)</button>
+    <p class="form-error" role="alert"></p>
+    <p class="legal-links">알림 신청 정보는 파티장이 닫힐 때 함께 지워요.</p>`);
+  sheetBody.querySelector('#push-on')?.addEventListener('click', async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    b.textContent = '신청하는 중…';
+    try {
+      await subscribePush();
+      b.textContent = '알림을 신청했어요';
+      setStatus('점등 30분 전과 5분 전에 알림이 와요');
+    } catch (err) {
+      sheetBody.querySelector('.form-error').textContent = err.message || '알림을 신청하지 못했어요.';
+      b.disabled = false;
+      b.textContent = '휴대폰 알림 받기 (점등 30분·5분 전)';
+    }
+  });
+  sheetBody.querySelector('#cal-on').addEventListener('click', () => { downloadCalendar(); setStatus('캘린더에 추가하면 점등 10분 전에 알려드려요'); });
+}
 function addCalendarButton() {
   if (document.querySelector('#btn-calendar')) return;
   const btn = document.createElement('button');
   btn.id = 'btn-calendar';
   btn.className = 'btn';
-  btn.textContent = '자정 알림';
+  btn.textContent = '점등 알림';
   document.querySelector('.actions').insertBefore(btn, igniteBtn);
-  btn.addEventListener('click', () => {
-    const blob = calendarFile({ title: `${ROOF_STATE.owner}의 생일 파티 점등`, url: `${location.origin}/r/${ROOM_ID}`, at: ROOF_STATE.igniteAt });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'saengil-oksang-midnight.ics';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
-    setStatus('캘린더에 추가하면 자정 10분 전에 알려드려요');
-  });
+  btn.addEventListener('click', openReminder);
 }
 
 // ── 등불 다시 불러오기(숨김 해제 등) ──
@@ -902,9 +960,41 @@ function addManageButton() {
   const btn = document.createElement('button');
   btn.id = 'btn-manage';
   btn.className = 'icon-btn';
-  btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg><span>관리</span>';
+  btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg><span>현황·관리</span>';
   document.querySelector('.top-right').appendChild(btn);
   btn.addEventListener('click', openManage);
+}
+
+// 준비 현황판: 숫자와 함께 지금 하면 좋은 일을 알려준다
+function boardHtml(d) {
+  const nL = d.lanterns.filter((l) => !l.hidden).length;
+  const senders = new Set(d.lanterns.map((l) => l.name)).size;
+  const left = d.igniteAt - serverNow();
+  const before = left > 0;
+  const hours = Math.floor(left / 3600_000);
+  const tips = [];
+  if (before && !d.ownerSeen) tips.push([`${josa(ROOF_STATE.owner, '이가')} 아직 주인공 링크를 열지 않았어요. 점등 시각을 알 수 있게 미리 보내주세요.`, 'owner']);
+  if (before && nL < 5) tips.push(['등불이 아직 적어요. 단톡방에 친구 링크를 한 번 더 올려보세요.', 'friend']);
+  else if (before && nL < GOAL_LANTERNS) tips.push([`등불 ${GOAL_LANTERNS}개를 모으면 점등 때 유성우가 내려요. ${GOAL_LANTERNS - nL}개 남았어요.`, 'friend']);
+  if (before && left < 3 * 3600_000) tips.push(['곧 점등이에요. 친구들에게 점등 시각에 다시 들어오라고 알려주세요.', 'friend']);
+  if (!tips.length) tips.push([before ? '준비가 잘 되고 있어요. 점등 시각에 다 같이 모여요.' : '점등이 끝났어요. 기억 카드를 저장해 두세요.', '']);
+  const stat = (n, label) => `<div class="board-stat"><b>${n}</b><span>${label}</span></div>`;
+  return `<div class="board-stats">${stat(nL, '등불')}${stat(senders, '보낸 친구')}${stat(d.gifts.length, '선물')}${stat(d.online, '지금 접속')}</div>
+    <p class="board-when">${before ? (hours >= 1 ? `점등까지 ${hours}시간` : `점등까지 ${Math.max(1, Math.ceil(left / 60000))}분`) : '점등이 끝났어요'} · 주인공 링크 ${d.ownerSeen ? '열어봄' : '아직 안 열어봄'}</p>
+    <ul class="board-tips">${tips.map(([t, link]) => `<li>${esc(t)}${link ? ` <button type="button" class="link-btn" data-copy-tip="${link}">${link === 'owner' ? '주인공 링크 복사' : '친구 링크 복사'}</button>` : ''}</li>`).join('')}</ul>`;
+}
+async function refreshBoard() {
+  const el = sheetBody.querySelector('.board');
+  if (!el) return;
+  try {
+    const d = await api(`/api/rooftops/${ROOM_ID}${authQuery()}`);
+    el.innerHTML = boardHtml(d);
+    el.querySelectorAll('[data-copy-tip]').forEach((b) => b.addEventListener('click', async () => {
+      const base = `${location.origin}/r/${ROOM_ID}`;
+      const url = b.dataset.copyTip === 'owner' ? `${base}?k=${ROOF_STATE.keys.ownerKey}` : base;
+      b.textContent = (await copyText(url)) ? '복사했어요' : '복사하지 못했어요';
+    }));
+  } catch { el.innerHTML = '<p class="sheet-lead">현황을 불러오지 못했어요.</p>'; }
 }
 
 function openManage() {
@@ -916,8 +1006,9 @@ function openManage() {
   ];
   const hidden = ROOF_STATE.hidden;
   openSheet(`
-    <h2>파티장 관리</h2>
+    <h2>준비 현황 · 관리</h2>
     <p class="sheet-lead">이 화면은 파티장을 만든 사람에게만 보여요.</p>
+    <div class="board" aria-live="polite"><p class="sheet-lead">현황을 불러오는 중…</p></div>
     ${links.map(([id, label, url]) => `
       <div class="link-card"><p class="link-title">${esc(label)}</p>
         <input id="${id}" readonly value="${esc(url)}"><button class="btn" data-copy="${id}">복사</button></div>`).join('')}
@@ -928,6 +1019,7 @@ function openManage() {
     <p class="sheet-lead">등불이 모두 지워지고 되돌릴 수 없어요.</p>
     <button class="btn wide danger" id="delete-roof">이 파티장 지우기</button>
     <p class="form-error" role="alert"></p>`);
+  refreshBoard();
   sheetBody.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => {
     const input = document.getElementById(b.dataset.copy);
     input.select();
@@ -1081,8 +1173,10 @@ function openLetters() {
         <div><p class="letter-msg">${esc(l.msg)}</p><p class="letter-from">${esc(l.name)}${lanternMeta(l) ? ` · ${esc(lanternMeta(l))}` : ''}</p></div>
         ${MODE === 'room' && l.id != null ? `<button type="button" class="bubble-act" data-letter="${i}">${canHide() ? '숨기기' : '신고'}</button>` : ''}
       </li>`).join('')}</ul>
+    ${list.length ? '<button type="button" class="btn primary wide" id="save-memory">기억 카드로 저장 (등불 전부 한 장에)</button>' : ''}
     <a class="btn wide cta-link" href="/?ref=${esc(ROOM_ID || '')}">내 생일 파티도 만들기</a>`);
   sheetBody.querySelector('.cta-link').addEventListener('click', () => track('cta_click'));
+  sheetBody.querySelector('#save-memory')?.addEventListener('click', (e) => saveMemoryCard(e.currentTarget));
   sheetBody.querySelectorAll('[data-thanks]').forEach((b) => b.addEventListener('click', () => sendThanks(Number(b.dataset.thanks), b)));
   sheetBody.querySelectorAll('[data-letter]').forEach((b) => b.addEventListener('click', async () => {
     const l = list[Number(b.dataset.letter)];
@@ -1127,8 +1221,12 @@ function addCandleButton() {
   btn.addEventListener('click', async () => {
     btn.disabled = true;
     try {
-      if (MODE === 'room') await api(`/api/rooftops/${ROOM_ID}/candles`, { method: 'POST', body: authBody() });
-      blowCandles(true);
+      // 다 같이 생일 노래를 부른 뒤 촛불이 꺼진다
+      if (MODE === 'room') {
+        const r = await api(`/api/rooftops/${ROOM_ID}/candles`, { method: 'POST', body: authBody() });
+        if (r.songAt) startSong(r.songAt - serverOffset);
+        else blowCandles(true);
+      } else startSong(Date.now() + 600);
     } catch (err) { setStatus(err.message); btn.disabled = false; }
   });
 }
@@ -1142,6 +1240,274 @@ function blowCandles(celebrate) {
   sound.swell();
   people.forEach((p, i) => setTimeout(() => p.av.hop(), i * 70));
   setStatus(`${josa(ROOF_STATE.owner, '이가')} 촛불을 껐어요! 생일 축하해요`, 6000);
+}
+
+// ── 생일 노래 떼창: 주인공이 촛불을 끄기 전에 모두의 화면에 같은 박자로 가사가 흐른다 ──
+let song = null;
+function startSong(atLocal) {
+  if (song || ROOF_STATE.candlesOut) return;
+  document.querySelector('#btn-candles')?.remove();
+  const lines = songLines(ROOF_STATE.owner);
+  const el = document.createElement('div');
+  el.id = 'song';
+  el.setAttribute('role', 'status');
+  el.innerHTML = `<p class="song-title">다 같이 불러요</p>${lines.map((l) => `<p class="song-line"><span data-text="${esc(l.text)}">${esc(l.text)}</span></p>`).join('')}`;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+  sound.birthdaySong((atLocal - Date.now()) / 1000);
+  song = { t0: atLocal + LEAD_IN * BEAT * 1000, lines, el, hopped: new Set() };
+}
+function updateSong() {
+  if (!song) return;
+  const beat = (Date.now() - song.t0) / 1000 / BEAT;
+  const rows = song.el.querySelectorAll('.song-line');
+  song.lines.forEach((l, i) => {
+    const p = THREE.MathUtils.clamp((beat - l.at) / l.len, 0, 1);
+    rows[i].classList.toggle('on', beat >= l.at - 0.3 && beat < l.at + l.len);
+    rows[i].classList.toggle('done', beat >= l.at + l.len);
+    rows[i].style.setProperty('--p', `${(p * 100).toFixed(1)}%`);
+    // 줄이 바뀔 때마다 다 같이 살짝 뛴다
+    if (beat >= l.at && !song.hopped.has(i)) { song.hopped.add(i); people.forEach((pp, k) => setTimeout(() => pp.av.hop(), k * 40)); }
+  });
+  song.el.querySelector('.song-title').textContent = beat < 0 ? `${Math.ceil(-beat)}… 다 같이 불러요` : `${ROOF_STATE.owner}에게 불러주는 노래`;
+  if (beat > SONG_BEATS + 0.6) {
+    const el = song.el;
+    song = null;
+    el.classList.remove('show');
+    setTimeout(() => el.remove(), 500);
+    blowCandles(true);
+  }
+}
+
+// ── 가볍게 보기: 3D를 끄고 등불 목록과 점등 소식만 보여준다(오래된 휴대폰·데이터 절약) ──
+let lite = false;
+let liteTimer = null;
+function renderLite() {
+  const el = document.querySelector('#lite');
+  if (!el) return;
+  const lit = litLevel > 1 || ignite;
+  const giftN = gifts.list.length;
+  el.querySelector('.lite-state').textContent = lit ? `불이 켜졌어요! ${ROOF_STATE.owner}의 생일을 축하해요` : `${VENUES[world.id]?.name || ''} · 등불 ${lanterns.length}개${giftN ? ` · 선물 ${giftN}개` : ''}`;
+  el.classList.toggle('lit', !!lit);
+  el.querySelector('.letters').innerHTML = lanterns.length ? lanterns.map((l) => `<li><i style="--c:${hex6(l.color)}" aria-hidden="true"></i><div><p class="letter-msg">${esc(l.msg)}</p><p class="letter-from">${esc(l.name)}${lanternMeta(l) ? ` · ${esc(lanternMeta(l))}` : ''}</p></div></li>`).join('') : '<li class="lite-empty">아직 걸린 등불이 없어요. 첫 등불을 달아주세요.</li>';
+}
+function setLite(on) {
+  lite = on;
+  document.body.classList.toggle('lite', on);
+  let el = document.querySelector('#lite');
+  if (on && !el) {
+    el = document.createElement('section');
+    el.id = 'lite';
+    el.setAttribute('aria-label', '가볍게 보기');
+    el.innerHTML = '<p class="lite-state"></p><ul class="letters"></ul><button type="button" class="btn wide" id="lite-off">3D로 보기</button>';
+    document.body.appendChild(el);
+    el.querySelector('#lite-off').addEventListener('click', () => setLite(false));
+  }
+  clearInterval(liteTimer);
+  if (on) { renderLite(); liteTimer = setInterval(renderLite, 1500); }
+  store.set('lite', on);
+  const b = document.querySelector('#btn-lite span');
+  if (b) b.textContent = on ? '3D로 보기' : '가볍게 보기';
+}
+function wireLiteButton() {
+  addTopButton('btn-lite', '가볍게 보기', '<path d="M4 6h16M4 12h16M4 18h10"/>', () => { setLite(!lite); track(lite ? 'lite_on' : 'lite_off'); });
+  if (QS.get('lite') === '1' || store.get('lite')) setLite(true);
+}
+
+// ── 주인공 입장 행진: 친구들이 양옆으로 줄을 서고, 주인공이 조명을 받으며 입구에서 케이크까지 걸어 들어온다 ──
+let procession = null;
+let ogPose = false;
+let processionDone = false;
+const spotLight = new THREE.SpotLight(0xfff0d0, 0, 22, 0.3, 0.55, 1.1);
+scene.add(spotLight, spotLight.target);
+function startProcession(owner, { then = null } = {}) {
+  if (procession || processionDone || ignite || groupPhoto || !owner) return false;
+  processionDone = true;
+  const from = world.entrance.clone();
+  const to = new THREE.Vector3(0, 0, 2.4);
+  const len = Math.max(2, from.distanceTo(to));
+  const friends = people.filter((p) => p !== owner);
+  const slots = new Map();
+  const perSide = Math.max(1, Math.floor((len - 0.6) / 1.1));
+  friends.forEach((p, i) => {
+    const k = Math.floor(i / 2);
+    const side = i % 2 ? 1 : -1;
+    const rank = Math.floor(k / perSide);
+    const along = ((k % perSide) + 0.6) / perSide;
+    const spot = to.clone().lerp(from, Math.min(0.97, along));
+    spot.x = side * (1.3 + rank * 0.95);
+    collide(spot);
+    slots.set(p, spot);
+    p.target = null;
+  });
+  owner.av.root.position.copy(from);
+  if (owner.net) owner.net.copy(from);
+  owner.target = null;
+  procession = { owner, from, to, t: 0, dur: 9, slots, clap: 0, then };
+  sound.swell();
+  setStatus(`${josa(ROOF_STATE.owner, '이가')} 입장해요! 박수로 맞아주세요`, 6000);
+  return true;
+}
+function updateProcession(dt) {
+  if (!procession) return;
+  const pr = procession;
+  pr.t += dt;
+  for (const [p, spot] of pr.slots) {
+    const pos = p.av.root.position;
+    const d = pos.distanceTo(spot);
+    const step = Math.min(d, dt * 6);
+    if (d > 0.01) pos.add(tmp.copy(spot).sub(pos).multiplyScalar(step / d));
+    p.speed = d > 0.05 ? 1 : 0;
+    if (p.net && !p.isMe) p.net.copy(pos);
+  }
+  // 친구들이 줄을 선 뒤(1.8초) 주인공이 천천히 걸어 들어온다
+  const k = THREE.MathUtils.clamp((pr.t - 1.8) / (pr.dur - 3), 0, 1);
+  const op = pr.owner.av.root.position;
+  const prev = op.clone();
+  op.lerpVectors(pr.from, pr.to, THREE.MathUtils.smoothstep(k, 0, 1));
+  pr.owner.speed = prev.distanceTo(op) > dt * 0.05 ? 1 : 0;
+  if (pr.owner.net && !pr.owner.isMe) pr.owner.net.copy(op);
+  spotLight.position.set(op.x, 9, op.z + 2);
+  spotLight.target.position.copy(op);
+  spotLight.intensity = THREE.MathUtils.lerp(spotLight.intensity, pr.t < pr.dur - 0.8 ? 22 : 0, dt * 3);
+  pr.clap -= dt;
+  if (pr.clap <= 0 && pr.slots.size && k > 0 && k < 1) {
+    pr.clap = 0.35;
+    const list = [...pr.slots.keys()];
+    showReaction(list[Math.floor(Math.random() * list.length)], Math.random() < 0.7 ? 'clap' : 'heart');
+  }
+  if (pr.t >= pr.dur) {
+    for (const p of pr.slots.keys()) p.wait = 2 + Math.random() * 3;
+    pr.owner.av.hop();
+    spotLight.intensity = 0;
+    procession = null;
+    pr.then?.();
+  }
+}
+function processionCamera(dt) {
+  const pr = procession;
+  const mid = pr.from.clone().lerp(pr.to, 0.5);
+  camPos.lerp(tmp.set(6.5, 3.6, mid.z + 1.5), Math.min(1, dt * 2));
+  camera.position.copy(camPos);
+  camLook.lerp(pr.owner.av.root.position.clone().setY(1), Math.min(1, dt * 3));
+}
+
+// ── 단체 사진: 주인공이 누르면 3-2-1 뒤 모두가 케이크 뒤에 모여 같은 장면을 찍는다 ──
+let groupPhoto = null;
+let groupShotPending = false;
+const PHOTO_CAM = new THREE.Vector3(0, 6.4, 7.6);
+const PHOTO_LOOK = new THREE.Vector3(0, 0.7, -3.3);
+function photoFormation(n) {
+  const spots = [];
+  const rows = [9, 11, 13, 15];
+  for (let r = 0; r < rows.length && spots.length < n; r++) {
+    const xs = [];
+    for (let i = 0; i < rows[r]; i++) xs.push((i - (rows[r] - 1) / 2) * 0.95 + (r % 2 ? 0.47 : 0));
+    xs.sort((a, b) => Math.abs(a) - Math.abs(b)); // 가운데부터 채운다
+    for (const x of xs) {
+      if (spots.length >= n) break;
+      spots.push(new THREE.Vector3(x, 0, -2.9 - r * 1.05));
+    }
+  }
+  return spots;
+}
+function startGroupPhoto(atLocal) {
+  if (groupPhoto || ignite || song) return;
+  hideBubble();
+  if (!sheetLocked) closeSheet();
+  // 모두의 화면에서 같은 자리: 주인공이 가운데, 나머지는 이름 순
+  const list = people.slice().sort((a, b) => (b.isOwner - a.isOwner) || a.label.textContent.localeCompare(b.label.textContent, 'ko'));
+  const spots = photoFormation(list.length);
+  const slots = new Map(list.map((p, i) => [p, spots[i]]));
+  for (const p of list) { p.av.faceCamera = true; p.target = null; }
+  const el = document.createElement('div');
+  el.id = 'countdown';
+  el.setAttribute('aria-live', 'assertive');
+  document.body.appendChild(el);
+  groupPhoto = { at: atLocal, slots, el, shot: false, last: '' };
+  setStatus('단체 사진을 찍어요! 케이크 뒤로 모여요', 4000);
+}
+function updateGroupPhoto(dt) {
+  if (!groupPhoto) return;
+  for (const [p, spot] of groupPhoto.slots) {
+    const pos = p.av.root.position;
+    const d = pos.distanceTo(spot);
+    const step = Math.min(d, dt * 6);
+    if (d > 0.01) pos.add(tmp.copy(spot).sub(pos).multiplyScalar(step / d));
+    p.speed = d > 0.05 ? 1 : 0;
+    if (p.net) p.net.copy(pos);
+  }
+  const left = groupPhoto.at - Date.now();
+  const label = left > 3000 ? '모여요' : left > 0 ? String(Math.ceil(left / 1000)) : '';
+  if (label !== groupPhoto.last) {
+    groupPhoto.last = label;
+    groupPhoto.el.textContent = label;
+    groupPhoto.el.classList.toggle('num', /\d/.test(label));
+    if (/\d/.test(label)) sound.click(3 - Number(label));
+  }
+  if (left <= 0 && !groupPhoto.shot) {
+    groupPhoto.shot = true;
+    groupShotPending = true;
+    groupPhoto.el.classList.add('flash');
+    sound.chime();
+  }
+  if (left < -1600) {
+    for (const p of groupPhoto.slots.keys()) { p.av.faceCamera = false; p.wait = 2 + Math.random() * 3; }
+    groupPhoto.el.remove();
+    groupPhoto = null;
+    people.forEach((p, i) => setTimeout(() => p.av.hop(), i * 50));
+  }
+}
+async function finishGroupPhoto(shot) {
+  const blob = await composePhoto(shot, {
+    owner: ROOF_STATE.owner,
+    when: `단체 사진 · ${VENUES[world.id]?.name || ''}`,
+    lanterns: lanterns.length,
+    gifts: gifts.list.length,
+    friends: people.length,
+  });
+  if (!blob) return;
+  const url = URL.createObjectURL(blob);
+  openSheet(`<h2>단체 사진을 찍었어요</h2><p class="sheet-lead">모두의 화면에서 같은 순간을 찍었어요.</p>
+    <img class="photo-preview" src="${url}" alt="${esc(ROOF_STATE.owner)}의 생일 파티 단체 사진">
+    <button class="btn primary wide" id="save-group">단체 사진 저장</button>`);
+  sheetBody.querySelector('#save-group').addEventListener('click', async () => {
+    track('group_photo_save');
+    const r = await saveVideo(blob, 'today-hero-group.jpg');
+    if (r === 'downloaded') setStatus('단체 사진을 저장했어요');
+  });
+}
+function canStartPhoto() { return MODE === 'demo' || ROOF_STATE.isOwner || ROOF_STATE.role === 'host'; }
+function wireGroupPhotoButton() {
+  if (!canStartPhoto()) return;
+  addTopButton('btn-group', '단체 사진', '<rect x="3" y="7" width="18" height="13" rx="2"/><circle cx="12" cy="13.5" r="3.5"/><path d="M8 7l1.5-3h5L16 7"/>', () => {
+    if (ignite || song) return setStatus('지금은 찍을 수 없어요. 잠시 후 다시 눌러주세요');
+    if (MODE === 'demo') return startGroupPhoto(Date.now() + 5000);
+    if (!conn) return setStatus('연결된 뒤에 찍을 수 있어요');
+    conn.send({ t: 'photo' });
+  });
+}
+
+// ── 기억 카드: 모든 등불 문구를 한 장으로 ──
+async function saveMemoryCard(btn) {
+  if (!lanterns.length) return setStatus('아직 걸린 등불이 없어요');
+  if (btn) btn.disabled = true;
+  try {
+    const blob = await composeMemoryCard({
+      owner: ROOF_STATE.owner,
+      when: revealLabel(ROOF_STATE.igniteAt),
+      venue: VENUES[world.id]?.name,
+      lanterns: lanterns.map((l) => ({ msg: l.msg, name: l.name, meta: lanternMeta(l), color: l.color })),
+      gifts: gifts.list.length,
+      thanks: ROOF_STATE.thanks || '',
+    });
+    track('memory_save');
+    const r = await saveVideo(blob, 'today-hero-memory.jpg');
+    if (r === 'downloaded') setStatus('기억 카드를 저장했어요. 파티장이 닫혀도 남아요');
+  } catch (e) {
+    reportError(`memory: ${e.message}`);
+    setStatus('기억 카드를 만들지 못했어요. 다시 눌러주세요');
+  } finally { if (btn) btn.disabled = false; }
 }
 
 // ── 점등 기념사진 ──
@@ -1383,12 +1749,19 @@ function startDemo() {
   }, () => '나');
   igniteBtn.textContent = '점등 미리보기';
   igniteBtn.hidden = false;
-  igniteBtn.addEventListener('click', startIgnite);
+  // 샘플: 처음 누르면 주인공 민지가 입장 행진을 한 뒤 점등한다
+  igniteBtn.addEventListener('click', () => {
+    if (processionDone || QS.get('quick')) return startIgnite();
+    const minji = addPerson({ name: '민지', color: 0xffc46b, outfit: 'dress' }, world.entrance.clone(), { npc: true, isOwner: true });
+    startProcession(minji, { then: startIgnite });
+  });
   document.querySelector('#btn-lantern').addEventListener('click', () => openLanternSheet(async ({ name, msg, color, rel, years }) => {
     hangLantern({ name: name || '나', msg, color, rel, years }, { from: me.av.root.position.clone().add(new THREE.Vector3(0, 1.6, 0)) });
     afterHang();
   }, '나'));
   wireLettersButton();
+  wireGroupPhotoButton();
+  wireLiteButton();
   wireReactions();
   updateGoal();
   track('demo_visit');
@@ -1510,6 +1883,14 @@ function showDoor(count, giftCount = 0) {
     door.querySelector('.door-sound').before(wrap);
     wrap.addEventListener('change', () => store.set('owner-outfit', new FormData(wrap).get('outfit')));
   }
+  if (!door.querySelector('.door-remind')) {
+    const rb = document.createElement('button');
+    rb.type = 'button';
+    rb.className = 'btn door-remind';
+    rb.textContent = '문 열리기 전에 알림 받기';
+    door.querySelector('.door-sound').after(rb);
+    rb.addEventListener('click', openReminder);
+  }
   track('owner_door');
   const render = () => {
     sub.textContent = countdownText();
@@ -1577,6 +1958,8 @@ function enterRoom(visitor) {
     return api(`/api/rooftops/${ROOM_ID}/gifts`, { method: 'POST', body: { ...b, x: spot.x, z: spot.z, peerId: myId } });
   }, () => (ROOF_STATE.isOwner ? ROOF_STATE.owner : visitor.name));
   wireLettersButton();
+  wireGroupPhotoButton();
+  wireLiteButton();
   wireReactions();
   if (!ROOF_STATE.isOwner) wireInviteButton();
   setStatus(ROOF_STATE.isOwner ? '친구들이 준비한 파티장이에요. 곧 점등이에요' : `등불을 달고, ${revealLabel(ROOF_STATE.igniteAt)}에 다시 와서 같이 불을 켜요`, 6500);
@@ -1604,9 +1987,11 @@ function handleNet(m) {
       setStatus('파티장이 가득 차서 구경 모드로 들어왔어요. 등불과 선물은 그대로 보낼 수 있어요', 7000);
     }
     countEl.textContent = `함께 있는 친구 ${m.peers.length + (m.spectator ? 0 : 1)}명`;
+    // 주인공이 처음 들어오는 순간(점등 전후 잠깐)에는 입장 행진
+    if (ROOF_STATE.isOwner && me && serverNow() < ROOF_STATE.igniteAt + 60_000) startProcession(me);
   } else if (m.t === 'join') {
     addPeer(m.peer);
-    if (m.peer.owner) setStatus(`${josa(ROOF_STATE.owner, '이가')} 파티장에 들어왔어요!`, 6000);
+    if (m.peer.owner && !startProcession(peersById.get(m.peer.id))) setStatus(`${josa(ROOF_STATE.owner, '이가')} 파티장에 들어왔어요!`, 6000);
     else setStatus(`${josa(m.peer.name, '이가')} 파티장에 들어왔어요`, 3000);
   } else if (m.t === 'leave') {
     const p = peersById.get(m.id);
@@ -1619,7 +2004,10 @@ function handleNet(m) {
     showThanks(m.text);
     setStatus(`${josa(ROOF_STATE.owner, '이가')} 답례를 남겼어요: ${m.text}`, 6000);
   } else if (m.t === 'candles') {
-    blowCandles(true);
+    if (m.songAt) startSong(m.songAt - serverOffset);
+    else blowCandles(true);
+  } else if (m.t === 'photo') {
+    startGroupPhoto(m.at - serverOffset);
   } else if (m.t === 'ended') {
     showEnded();
   } else if (m.t === 'state') {
@@ -1671,13 +2059,28 @@ function frame() {
   const t = clock.elapsedTime;
   // 닫힌 문 화면이나 숨겨진 탭에서는 그리지 않는다
   if (document.hidden || (!doorEl.hidden && !doorEl.classList.contains('opening'))) return;
+  if (lite) {
+    // 3D를 그리지 않고 점등·노래 시각만 챙긴다
+    updateSong();
+    updateIgnite(dt);
+    if (MODE === 'room' && !ignitedThisSession && serverNow() >= ROOF_STATE.igniteAt && !store.get(`seen:${ROOM_ID}`) && serverNow() - ROOF_STATE.igniteAt < 600_000) {
+      store.set(`seen:${ROOM_ID}`, true);
+      startIgnite();
+    }
+    return;
+  }
   adaptQuality(dt);
 
-  if (me) updateMe(dt);
-  for (const p of people) {
-    if (p.npc) updateNpc(p, dt);
-    else if (!p.isMe) updatePeer(p, dt);
+  if (groupPhoto) updateGroupPhoto(dt);
+  else if (procession) updateProcession(dt);
+  else {
+    if (me) updateMe(dt);
+    for (const p of people) {
+      if (p.npc) updateNpc(p, dt);
+      else if (!p.isMe) updatePeer(p, dt);
+    }
   }
+  updateSong();
 
   // 내 위치 보내기(초당 10번, 움직였을 때만)
   if (conn && me && performance.now() - lastSent > 100) {
@@ -1698,7 +2101,17 @@ function frame() {
   }
 
   // 카메라
-  if (MODE === 'landing' || !me) {
+  if (ogPose) {
+    camera.position.set(0, 5.2, 12.5);
+    world.clampCamera?.(camera.position);
+    camera.position.x += 0.9; // 돔 뼈대가 화면 한가운데를 가리지 않게 살짝 비켜서
+    camLook.set(0, 3.2, 0);
+  } else if (procession) processionCamera(dt);
+  else if (groupPhoto) {
+    camPos.lerp(PHOTO_CAM, Math.min(1, dt * 3));
+    camera.position.copy(camPos);
+    camLook.lerp(PHOTO_LOOK, Math.min(1, dt * 3));
+  } else if (MODE === 'landing' || !me) {
     const a = t * 0.05;
     camPos.lerp(new THREE.Vector3(Math.sin(a) * 15, 7, Math.cos(a) * 15), Math.min(1, dt * 2));
     camera.position.copy(camPos);
@@ -1759,6 +2172,10 @@ function frame() {
     photoPending = false;
     try { photoShot = snapshot(renderer.domElement); } catch (e) { reportError(`photo: ${e.message}`); }
   }
+  if (groupShotPending) {
+    groupShotPending = false;
+    try { finishGroupPhoto(snapshot(renderer.domElement)); } catch (e) { reportError(`group photo: ${e.message}`); }
+  }
   if (!booted) {
     booted = true;
     const boot = document.querySelector('#boot');
@@ -1774,6 +2191,8 @@ frame();
 
 // 테스트용 핸들
 window.__lantern = {
+  // 미리보기 이미지(카카오톡·SNS) 촬영용: 불이 켜진 장면을 정해진 각도에서
+  ogPose() { ogPose = true; setLitInstantly(); for (const b of world.bulbs) b.material.emissiveIntensity = 2.6; },
   get mode() { return MODE; },
   get lanterns() { return lanterns.length; },
   get slotCount() { return slots.length; },

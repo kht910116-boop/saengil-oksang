@@ -292,7 +292,8 @@ export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46
     return d;
   };
 
-  return {
+  const api = {
+    faceCamera: false,
     root,
     labelY: 1.72,
     hop() { hop = 1; },
@@ -308,8 +309,9 @@ export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46
       last.copy(pos);
       hasLast = true;
       let target = heading;
-      if (idle > 1.2) target = Math.atan2(camera.position.x - pos.x, camera.position.z - pos.z);
-      turn.rotation.y += angleTo(turn.rotation.y, target) * Math.min(1, dt * (idle > 1.2 ? 2.5 : 10));
+      const facing = idle > 1.2 || api.faceCamera; // 단체 사진처럼 카메라를 봐야 할 때는 바로 돌아본다
+      if (facing) target = Math.atan2(camera.position.x - pos.x, camera.position.z - pos.z);
+      turn.rotation.y += angleTo(turn.rotation.y, target) * Math.min(1, dt * (api.faceCamera ? 8 : idle > 1.2 ? 2.5 : 10));
 
       const moving = speed > 0.05;
       walkT += dt * (moving ? 12 : 2.2);
@@ -340,4 +342,5 @@ export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46
       if (capeG) capeG.rotation.x = THREE.MathUtils.lerp(capeG.rotation.x, moving ? -0.28 - Math.sin(walkT * 2) * 0.05 : -0.04, Math.min(1, dt * 6));
     },
   };
+  return api;
 }
