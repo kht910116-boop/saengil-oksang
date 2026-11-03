@@ -68,9 +68,12 @@ export function cakeTable(group, { legColor = 0x3a3150, topColor = PAL.paper, at
     const a = (i / 5) * Math.PI * 2;
     const candle = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.2, 6), new THREE.MeshStandardMaterial({ color: PAL.mint }));
     candle.position.set(Math.cos(a) * 0.22, 1.69, Math.sin(a) * 0.22);
-    const flame = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffd27a }));
+    // 불꽃은 심지 끝을 축으로 눕고 늘어나도록 아래쪽을 원점으로 둔다
+    const flameGeo = new THREE.SphereGeometry(0.04, 10, 8);
+    flameGeo.translate(0, 0.04, 0);
+    const flame = new THREE.Mesh(flameGeo, new THREE.MeshBasicMaterial({ color: 0xffd27a }));
     flame.scale.y = 1.6;
-    flame.position.set(candle.position.x, 1.83, candle.position.z);
+    flame.position.set(candle.position.x, 1.79, candle.position.z);
     table.add(candle, flame);
     flames.push(flame);
   }
@@ -195,28 +198,104 @@ export function city(group, { count = 70, distMin = 34, distMax = 79, yBase = -1
   }
 }
 
+// 촛불 연기: 부드러운 회색 점이 꼬불꼬불 올라가며 퍼진다
+function smokeTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(235,235,245,0.9)');
+  grad.addColorStop(0.5, 'rgba(210,210,225,0.35)');
+  grad.addColorStop(1, 'rgba(200,200,220,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+}
+
 // 장소 하나를 완성한다: 공통 동작(촛불, 풍선 흔들림)과 장소별 움직임, 정리 함수를 붙인다
 export function finishWorld(scene, group, parts) {
   const { flames, candleLight, balloons = [], extraUpdate } = parts;
-  let candlesLit = true;
-  let blowT = 0;
+  let state = 'lit'; // lit → blowing → out
+  let bt = 0; // 끄기 시작한 뒤 흐른 시간
+  let blowDir = new THREE.Vector3(0, 0, -1); // 입김이 부는 방향(촛불이 이쪽으로 눕는다)
+  let onSnuff = null;
+  const outAt = flames.map((_, i) => 0.35 + i * 0.16 + Math.random() * 0.06);
+  const snuffed = new Set();
+  const smokeTex = smokeTexture();
+  const smoke = [];
+  const tmpV = new THREE.Vector3();
+
+  function puff(pos, k) {
+    const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTex, transparent: true, depthWrite: false, opacity: 0 }));
+    m.position.copy(pos);
+    m.scale.setScalar(0.06);
+    m.userData = { age: -k * 0.12, life: 2.6 + Math.random() * 0.8, seed: Math.random() * 6, x0: pos.x, z0: pos.z };
+    group.add(m);
+    smoke.push(m);
+  }
+  function snuff(i) {
+    snuffed.add(i);
+    const f = flames[i];
+    f.visible = false;
+    f.getWorldPosition(tmpV);
+    for (let k = 0; k < 7; k++) puff(tmpV, k); // 한 줄기 연기 = 작은 점 여러 개가 차례로
+    onSnuff?.(i);
+  }
   scene.add(group);
   return {
     ...parts,
     group,
+    // 즉시 켜거나 끈다(늦게 들어온 사람, 다시 보기)
     setCandles(lit) {
-      candlesLit = lit;
-      blowT = lit ? 0 : 1;
-      if (lit) for (const f of flames) f.visible = true;
+      state = lit ? 'lit' : 'out';
+      snuffed.clear();
+      for (const f of flames) { f.visible = lit; f.rotation.set(0, 0, 0); }
+      candleLight.intensity = lit ? 3.4 : 0;
     },
+    // 입김으로 끄는 연출: from 쪽에서 불어 촛불이 반대쪽으로 눕고 하나씩 꺼지며 연기가 오른다
+    blowOut({ from = null, snuffCb = null } = {}) {
+      if (state !== 'lit') return;
+      state = 'blowing';
+      bt = 0;
+      onSnuff = snuffCb;
+      if (from) blowDir = tmpV.set(-from.x, 0, -from.z).normalize().clone();
+    },
+    get candleState() { return state; },
     update(t, dt = 0.016) {
-      if (!candlesLit) {
-        blowT = Math.max(0, blowT - dt * 1.5);
-        for (const f of flames) { f.scale.setScalar(Math.max(0.001, blowT)); f.visible = blowT > 0.01; }
-        candleLight.intensity = 3.4 * blowT;
-      } else {
-        for (const f of flames) f.scale.set(1 + Math.sin(t * 17 + f.position.x * 40) * 0.12, 1.6 + Math.sin(t * 23 + f.position.z * 30) * 0.25, 1);
+      if (state === 'lit') {
+        for (const f of flames) {
+          f.rotation.set(0, 0, 0);
+          f.scale.set(1 + Math.sin(t * 17 + f.position.x * 40) * 0.12, 1.6 + Math.sin(t * 23 + f.position.z * 30) * 0.25, 1);
+        }
         candleLight.intensity = 3.4 + Math.sin(t * 13) * 0.4 + Math.sin(t * 29) * 0.25;
+      } else if (state === 'blowing') {
+        bt += dt;
+        const gust = THREE.MathUtils.smoothstep(bt, 0.05, 0.3); // 바람이 닿는 정도
+        flames.forEach((f, i) => {
+          if (snuffed.has(i)) return;
+          const shake = Math.sin(t * 60 + i * 2) * 0.25 * gust;
+          // 바람 방향으로 눕고 길게 늘어나며 마구 흔들린다
+          f.rotation.x = blowDir.z * (1.1 * gust) + shake * 0.4;
+          f.rotation.z = -blowDir.x * (1.1 * gust) + shake;
+          f.scale.set(0.8 - gust * 0.3, 1.6 + gust * 0.9 + shake, 0.8);
+          if (bt >= outAt[i]) snuff(i);
+        });
+        const left = flames.length - snuffed.size;
+        candleLight.intensity = THREE.MathUtils.lerp(candleLight.intensity, (3.4 * left) / flames.length * (1 - gust * 0.3), Math.min(1, dt * 10));
+        if (!left) { state = 'out'; candleLight.intensity = 0; }
+      }
+      for (let i = smoke.length - 1; i >= 0; i--) {
+        const m = smoke[i];
+        const u = m.userData;
+        u.age += dt;
+        if (u.age < 0) continue;
+        const k = u.age / u.life;
+        m.position.y += dt * (0.45 - k * 0.2);
+        m.position.x = u.x0 + Math.sin(u.age * 2.2 + u.seed) * 0.08 * (1 + k * 3) - blowDir.x * u.age * 0.12;
+        m.position.z = u.z0 + Math.cos(u.age * 1.7 + u.seed) * 0.06 * (1 + k * 3) - blowDir.z * u.age * 0.12;
+        m.scale.setScalar(0.06 + k * 0.55);
+        m.material.opacity = Math.min(1, u.age * 4) * (1 - k) * 0.55;
+        if (k >= 1) { group.remove(m); m.material.dispose(); smoke.splice(i, 1); }
       }
       for (const b of balloons) {
         const ph = b.userData.phase;
@@ -227,6 +306,7 @@ export function finishWorld(scene, group, parts) {
     },
     dispose() {
       scene.remove(group);
+      smokeTex.dispose();
       group.traverse((o) => {
         o.geometry?.dispose();
         const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];

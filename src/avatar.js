@@ -279,6 +279,9 @@ export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46
   root.add(shadow);
 
   let walkT = Math.random() * 6;
+  let gestureKind = null;
+  let gestureT = 0;
+  const GESTURE_LEN = { clap: 1.0, heart: 1.4, cheer: 1.8, wave: 1.6, spin: 0.9 };
   let hop = 0;
   let idle = 0;
   let heading = 0;
@@ -294,6 +297,13 @@ export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46
 
   const api = {
     faceCamera: false,
+    faceTarget: null, // 이 지점을 바라본다(촛불 끄기)
+    lean: 0, // 앞으로 숙이기 0~1
+    puff: 0, // 숨을 들이쉬어 부푼 정도 0~1
+    sway: 0, // 노래할 때 좌우로 흔들기 0~1
+    swayPhase: 0, // 흔들기 박자(모두 같은 값을 주면 다 같이 흔든다)
+    // 몸짓: clap(박수) · heart(머리 위 하트) · cheer(만세) · wave(손 흔들기) · spin(한 바퀴)
+    gesture(kind) { gestureKind = kind; gestureT = 0; },
     root,
     labelY: 1.72,
     hop() { hop = 1; },
@@ -311,7 +321,8 @@ export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46
       let target = heading;
       const facing = idle > 1.2 || api.faceCamera; // 단체 사진처럼 카메라를 봐야 할 때는 바로 돌아본다
       if (facing) target = Math.atan2(camera.position.x - pos.x, camera.position.z - pos.z);
-      turn.rotation.y += angleTo(turn.rotation.y, target) * Math.min(1, dt * (api.faceCamera ? 8 : idle > 1.2 ? 2.5 : 10));
+      if (api.faceTarget) target = Math.atan2(api.faceTarget.x - pos.x, api.faceTarget.z - pos.z); // 케이크 쪽 보기
+      turn.rotation.y += angleTo(turn.rotation.y, target) * Math.min(1, dt * (api.faceCamera || api.faceTarget ? 8 : idle > 1.2 ? 2.5 : 10));
 
       const moving = speed > 0.05;
       walkT += dt * (moving ? 12 : 2.2);
@@ -322,9 +333,12 @@ export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46
       const squish = moving ? Math.sin(walkT * 2) * 0.07 : Math.sin(walkT) * 0.025;
       const land = hop > 0 && hop < 0.25 ? (0.25 - hop) * 0.8 : 0;
       const sy = 1 + squish + hopK * 0.12 - land;
-      jelly.scale.set(1 / Math.sqrt(sy), sy, 1 / Math.sqrt(sy));
+      const pf = 1 + api.puff * 0.12; // 숨을 들이쉬면 볼이 빵빵하게
+      jelly.scale.set(pf / Math.sqrt(sy), sy * (1 + api.puff * 0.05), pf / Math.sqrt(sy));
+      jelly.rotation.x = api.lean * 0.38;
       jelly.position.y = (moving ? Math.abs(Math.sin(walkT)) * 0.08 : 0) + hopK * 0.75;
       jelly.rotation.z = moving ? Math.sin(walkT) * 0.06 : 0;
+      if (api.sway) jelly.rotation.z += Math.sin(api.swayPhase) * 0.13 * api.sway; // 노래에 맞춰 좌우로
 
       // 팔과 발
       const swing = moving ? Math.sin(walkT) * 0.6 : 0;
@@ -332,6 +346,33 @@ export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46
       armR.rotation.x = -swing;
       armL.rotation.z = -0.35 - hopK * 1.9;
       armR.rotation.z = 0.35 + hopK * 1.9;
+      // 몸짓은 팔 움직임 위에 덮어쓴다
+      if (gestureKind) {
+        gestureT += dt;
+        const len = GESTURE_LEN[gestureKind] || 1;
+        const k = gestureT / len;
+        const env = Math.min(1, gestureT * 6) * Math.min(1, (len - gestureT) * 5); // 부드럽게 시작하고 끝남
+        if (gestureKind === 'clap') {
+          const c = 0.35 + Math.abs(Math.sin(gestureT * 14)) * 0.45;
+          armL.rotation.x = THREE.MathUtils.lerp(armL.rotation.x, -1.25, env);
+          armR.rotation.x = THREE.MathUtils.lerp(armR.rotation.x, -1.25, env);
+          armL.rotation.z = THREE.MathUtils.lerp(armL.rotation.z, c, env);
+          armR.rotation.z = THREE.MathUtils.lerp(armR.rotation.z, -c, env);
+        } else if (gestureKind === 'heart') {
+          armL.rotation.z = THREE.MathUtils.lerp(armL.rotation.z, -2.95, env);
+          armR.rotation.z = THREE.MathUtils.lerp(armR.rotation.z, 2.95, env);
+          armL.rotation.x = armR.rotation.x = -0.25 * env;
+        } else if (gestureKind === 'cheer') {
+          const w = Math.sin(gestureT * 12) * 0.25;
+          armL.rotation.z = THREE.MathUtils.lerp(armL.rotation.z, -2.4 + w, env);
+          armR.rotation.z = THREE.MathUtils.lerp(armR.rotation.z, 2.4 - w, env);
+        } else if (gestureKind === 'wave') {
+          armR.rotation.z = THREE.MathUtils.lerp(armR.rotation.z, 2.5 + Math.sin(gestureT * 10) * 0.35, env);
+        } else if (gestureKind === 'spin') {
+          jelly.rotation.y = THREE.MathUtils.smootherstep(k, 0, 1) * Math.PI * 2;
+        }
+        if (gestureT >= len) { gestureKind = null; jelly.rotation.y = 0; }
+      }
       footL.position.z = 0.03 + (moving ? Math.sin(walkT) * 0.12 : 0);
       footR.position.z = 0.03 - (moving ? Math.sin(walkT) * 0.12 : 0);
       footL.position.y = 0.07 + (moving ? Math.max(0, Math.sin(walkT)) * 0.06 : 0);

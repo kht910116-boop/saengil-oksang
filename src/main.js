@@ -7,7 +7,7 @@ import { buildWorld } from './world.js';
 import { createAvatar } from './avatar.js';
 import { sound } from './audio.js';
 import { api, connectRoom, track, reportError } from './net.js';
-import { createMeteors } from './effects.js';
+import { createMeteors, createConfetti, createBreath } from './effects.js';
 import { snapshot, composePhoto } from './photo.js';
 import { createRecorder, saveVideo, calendarFile } from './recorder.js';
 
@@ -117,6 +117,7 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 400);
 
 let world = buildWorld(scene, QS.get('venue') || DEFAULT_VENUE);
+sound.setVenue(world.id);
 const fill = new THREE.DirectionalLight(0xffe2c0, 0.9);
 camera.add(fill);
 fill.position.set(0.5, 1, 1);
@@ -275,6 +276,7 @@ function loadVenue(id) {
   if (world.id === v) return world;
   world.dispose();
   world = buildWorld(scene, v);
+  sound.setVenue(v);
   computeSlots();
   lanterns.forEach((l, i) => {
     const at = slots[i % slots.length];
@@ -373,7 +375,7 @@ canvas.addEventListener('wheel', (e) => {
 }, { passive: true });
 
 function onTap(x, y) {
-  if (!me) return;
+  if (!me || ceremony) return;
   ndc.set((x / window.innerWidth) * 2 - 1, -(y / window.innerHeight) * 2 + 1);
   ray.setFromCamera(ndc, camera);
   const giftHits = ray.intersectObjects(gifts.pickables(), true);
@@ -500,6 +502,8 @@ let skyName = null;
 const sparks = makeSparks();
 scene.add(sparks.points);
 const meteors = createMeteors(scene);
+const confetti = createConfetti(scene);
+const breath = createBreath(scene);
 let photoPending = false; // 다음 화면을 그린 직후 기념사진용으로 베낀다
 let photoShot = null;
 
@@ -569,8 +573,9 @@ function makeSparks() {
   };
 }
 
-function startIgnite() {
+function startIgnite(opts = {}) {
   if (ignite) return;
+  if (!opts.replay && !lite) startCeremony('ignite'); // 다시 보기는 혼자 보는 것이라 대열 없이
   resetLights();
   ignite = { t: 0, clicked: new Set() };
   ignitedThisSession = true;
@@ -607,7 +612,12 @@ function updateIgnite(dt) {
     if (lanterns.length >= GOAL_LANTERNS) meteors.start(9); // 공동 목표 달성 보상
     sparks.burst();
     sound.swell();
-    people.forEach((p, i) => setTimeout(() => p.av.hop(), i * 90));
+    // 불이 켜지는 순간: 주인공은 한 바퀴 돌고 만세, 친구들은 차례로 뛰며 만세
+    const lead = ceremonyLead();
+    people.forEach((p, i) => setTimeout(() => {
+      p.av.hop();
+      if (p === lead) { p.av.gesture('spin'); setTimeout(() => p.av.gesture('cheer'), 950); } else p.av.gesture(i % 3 ? 'cheer' : 'clap');
+    }, p === lead ? 0 : 150 + i * 90));
     const giftN = gifts.list.length;
     setStatus(`${ROOF_STATE.owner}의 생일이에요. ${josa([lanterns.length ? `등불 ${lanterns.length}개` : '', giftN ? `선물 ${giftN}개` : ''].filter(Boolean).join('와 ') || '파티장의 불', '이가')} 함께 켜졌어요`);
   }
@@ -617,6 +627,7 @@ function updateIgnite(dt) {
   if (t > 14) {
     recorder.stop();
     ignite = null;
+    setTimeout(() => endCeremony('ignite'), 800);
     litLevel = 3.2;
     document.body.classList.remove('is-igniting');
     igniteBtn.textContent = '점등 다시 보기';
@@ -709,7 +720,7 @@ function showGift(group) {
   bubble.querySelector('.bubble-msg').textContent = `${GIFT_ITEMS[g.item].name}`;
   bubble.querySelector('.bubble-from').textContent = `${josa(giftLabel(g), '이가')} 보낸 선물`;
   bubble.hidden = false;
-  sound.chime();
+  sound.paper();
 }
 function showLantern(l) {
   bubbleFor = l;
@@ -740,7 +751,7 @@ function showLantern(l) {
     bubble.appendChild(act);
   }
   bubble.hidden = false;
-  sound.chime();
+  sound.paper();
 }
 function hideBubble() { bubble.hidden = true; bubbleFor = null; }
 
@@ -796,6 +807,8 @@ let endedShown = false;
 function showEnded() {
   if (endedShown) return;
   endedShown = true;
+  sound.music(null);
+  sound.closing();
   conn?.close();
   openSheet(`
     <h2>파티장이 닫혔어요</h2>
@@ -853,7 +866,7 @@ function openLanternSheet(onSubmit, defaultName) {
 }
 
 function afterHang() {
-  sound.chime();
+  sound.lanternUp(true);
   me?.av.hop();
   setStatus(`등불을 달았어요. 지금 ${lanterns.length}개의 등불이 ${josa(ROOF_STATE.owner, '을를')} 기다려요`);
 }
@@ -1129,7 +1142,7 @@ function giftSpot() {
 function onGiftArrived(gift, animate) {
   const added = gifts.add(gift, { from: animate });
   if (!added) return;
-  sound.chime();
+  sound.gift(gift.item);
   if (gift.item === 'fireworks' && (MODE === 'demo' ? litLevel > 1 : serverNow() >= ROOF_STATE.igniteAt)) gifts.launchNow(gift);
 }
 function wireGiftButton(send, defaultName) {
@@ -1231,22 +1244,259 @@ function addCandleButton() {
     } catch (err) { setStatus(err.message); btn.disabled = false; }
   });
 }
+// ── 의식(점등식·촛불 끄기): 모두가 정해진 대열에 서고, 하트·별·박수만 보낼 수 있다 ──
+// 대열은 모든 화면에서 같은 규칙으로 계산한다: 주인공은 케이크 바로 앞, 친구들은 케이크 뒤 반원에 가운데부터.
+let ceremony = null;
+const CEREMONY_TEXT = { ignite: '점등식이 시작돼요. 하트·별·박수로 함께해요', candles: '생일 노래 시간이에요. 하트·별·박수로 함께해요' };
+function ceremonyLead() { return people.find((p) => p.isOwner) || me || null; }
+// 점등식: 주인공은 케이크 앞(카메라 쪽). 촛불: 주인공은 케이크 바로 옆에서 모두를 보고 섰다가 몸을 돌려 분다(인형이 케이크보다 작아 뒤에 서면 가려진다)
+const LEAD_SPOT = { ignite: new THREE.Vector3(0, 0, 2.05), candles: new THREE.Vector3(1.5, 0, 1.3) };
+function ceremonySpots(kind = ceremony?.kind || 'ignite') {
+  const lead = ceremonyLead();
+  const map = new Map();
+  if (lead) map.set(lead, LEAD_SPOT[kind].clone());
+  const rest = people.filter((p) => p !== lead).sort((a, b) => a.label.textContent.localeCompare(b.label.textContent, 'ko'));
+  const spots = [];
+  for (const r of [3.0, 4.0, 5.0, 6.0, 7.0]) {
+    const a0 = Math.PI - 0.5;
+    const a1 = Math.PI * 2 + 0.5;
+    const n = Math.floor(((a1 - a0) * r) / 1.0);
+    const ring = [];
+    for (let i = 0; i <= n; i++) {
+      const a = a0 + ((a1 - a0) * i) / n;
+      ring.push(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
+    }
+    ring.sort((p, q) => Math.abs(p.x) - Math.abs(q.x)); // 케이크 뒤 가운데부터 채운다
+    spots.push(...ring);
+    if (spots.length >= rest.length) break;
+  }
+  rest.forEach((p, i) => { const sp = spots[i % spots.length].clone(); collide(sp); map.set(p, sp); });
+  return map;
+}
+function startCeremony(kind) {
+  if (ceremony?.kind === kind) return;
+  if (procession) { procession.t = procession.dur; updateProcession(0); } // 입장 행진이 남아 있으면 마무리
+  if (groupPhoto) { groupPhoto.el.remove(); groupPhoto = null; }
+  hideBubble();
+  if (!sheetLocked) closeSheet();
+  ceremony = { kind, slots: ceremonySpots(kind) };
+  for (const p of people) p.target = null;
+  document.body.classList.add('ceremony');
+  let hint = document.querySelector('#ceremony-hint');
+  if (!hint) {
+    hint = document.createElement('p');
+    hint.id = 'ceremony-hint';
+    hint.setAttribute('role', 'status');
+    document.body.appendChild(hint);
+  }
+  hint.textContent = CEREMONY_TEXT[kind];
+}
+function endCeremony(kind) {
+  if (!ceremony || (kind && ceremony.kind !== kind)) return;
+  for (const p of people) {
+    p.av.faceCamera = false;
+    p.av.sway = 0;
+    p.wait = 1.5 + Math.random() * 3;
+    if (p.net && !p.isMe) p.net.copy(p.av.root.position); // 다음 위치가 올 때까지 대열 자리에서 기다린다
+  }
+  ceremony = null;
+  document.body.classList.remove('ceremony');
+  document.querySelector('#ceremony-hint')?.remove();
+}
+function updateCeremony(dt) {
+  if (!ceremony) return;
+  const lead = ceremonyLead();
+  for (const p of people) {
+    if (candleBlow && p === candleBlow.blower) continue; // 촛불 부는 사람은 그 연출이 움직인다
+    let spot = ceremony.slots.get(p);
+    if (!spot) { ceremony.slots = ceremonySpots(); spot = ceremony.slots.get(p); } // 도중에 들어온 사람
+    const pos = p.av.root.position;
+    const d = pos.distanceTo(spot);
+    const step = Math.min(d, dt * 5);
+    if (d > 0.01) pos.add(tmp.copy(spot).sub(pos).multiplyScalar(step / d));
+    p.speed = d > 0.05 ? 1 : 0;
+    p.dirX = 0;
+    // 친구들은 주인공과 카메라 쪽을, 주인공은 점등 때 카메라를·촛불 때 케이크를 본다
+    p.av.faceCamera = true;
+  }
+}
+const CAKE_CENTER = new THREE.Vector3(0, 0, 0);
+
+// 주인공 주위를 도는 금빛 반짝이: 누가 주인공인지 멀리서도 보인다
+const aura = (() => {
+  const n = 16;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  const c = document.createElement('canvas');
+  c.width = c.height = 32;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+  grad.addColorStop(0, 'rgba(255,240,200,1)');
+  grad.addColorStop(0.4, 'rgba(255,200,90,0.6)');
+  grad.addColorStop(1, 'rgba(255,200,90,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 32, 32);
+  const pts = new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.11, map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+  pts.frustumCulled = false;
+  pts.visible = false;
+  scene.add(pts);
+  return {
+    update(t) {
+      const owner = people.find((p) => p.isOwner);
+      pts.visible = !!owner;
+      if (!owner) return;
+      const o = owner.av.root.position;
+      const arr = geo.attributes.position.array;
+      for (let i = 0; i < n; i++) {
+        const a = t * 0.9 + (i / n) * Math.PI * 2;
+        const rise = (t * 0.35 + i / n) % 1;
+        const r = 0.55 + Math.sin(t * 2 + i) * 0.06;
+        arr[i * 3] = o.x + Math.cos(a) * r;
+        arr[i * 3 + 1] = o.y + 0.15 + rise * 1.4;
+        arr[i * 3 + 2] = o.z + Math.sin(a) * r;
+      }
+      geo.attributes.position.needsUpdate = true;
+      pts.material.opacity = 0.75 + Math.sin(t * 3) * 0.2;
+    },
+  };
+})();
+const cerP = new THREE.Vector3();
+const cerL = new THREE.Vector3();
+function ceremonyCamera(dt) {
+  const portrait = camera.aspect < 1;
+  cerP.set(0, portrait ? 4.4 : 3.5, portrait ? 12.5 : 9.6);
+  cerL.set(0, 1.5, 0);
+  if (ceremony.kind === 'candles') cerL.set(0.5, 1.3, 0);
+  if (ignite) {
+    const sky = THREE.MathUtils.smoothstep(ignite.t, 0.6, 2.4);
+    cerP.y -= sky * (cerP.y - 1.9);
+    cerL.lerp(tmp.set(0, 9, -6), sky);
+  }
+  world.clampCamera?.(cerP);
+  camPos.lerp(cerP, Math.min(1, dt * 2));
+  camera.position.copy(camPos);
+  camLook.lerp(cerL, Math.min(1, dt * 2.2));
+}
+
+// 점등 직전 5초: 모두의 화면에 큰 숫자와 딱따기 소리
+const igniteCd = { last: null, el: null, demoAt: 0 };
+function updateIgniteCountdown() {
+  let left = Infinity;
+  if (MODE === 'room' && (me || ROOF_STATE.spectator) && !ignitedThisSession && !store.get(`seen:${ROOM_ID}`)) left = ROOF_STATE.igniteAt - serverNow();
+  else if (igniteCd.demoAt) left = igniteCd.demoAt - Date.now();
+  if (!(left > 0 && left <= 5000) || ignite) {
+    if (igniteCd.el) { igniteCd.el.remove(); igniteCd.el = null; igniteCd.last = null; }
+    if (igniteCd.demoAt && left <= 0) { igniteCd.demoAt = 0; startIgnite(); }
+    return;
+  }
+  if (!igniteCd.el) {
+    startCeremony('ignite');
+    igniteCd.el = document.createElement('div');
+    igniteCd.el.id = 'ignite-cd';
+    igniteCd.el.setAttribute('aria-live', 'assertive');
+    document.body.appendChild(igniteCd.el);
+  }
+  const n = Math.ceil(left / 1000);
+  if (n !== igniteCd.last) {
+    igniteCd.last = n;
+    igniteCd.el.textContent = String(n);
+    igniteCd.el.style.animation = 'none';
+    void igniteCd.el.offsetWidth; // 숫자가 바뀔 때마다 튀어나오는 움직임을 다시
+    igniteCd.el.style.animation = '';
+    sound.tick(n === 1);
+  }
+}
+
+// 촛불 끄기: 주인공이 케이크 앞으로 와서 숨을 들이쉬고 '후~' 불면 촛불이 하나씩 눕다가 꺼지고 연기가 오른다
+let candleBlow = null;
 function blowCandles(celebrate) {
-  if (ROOF_STATE.candlesOut && !celebrate) return;
+  if (candleBlow || (ROOF_STATE.candlesOut && !celebrate)) return;
   ROOF_STATE.candlesOut = true;
-  world.setCandles(false);
   document.querySelector('#btn-candles')?.remove();
-  if (!celebrate) return;
+  if (!celebrate || lite || world.candleState !== 'lit') {
+    world.setCandles(false);
+    if (celebrate) celebrateCandles();
+    return;
+  }
+  hideBubble();
+  const blower = ceremonyLead();
+  candleBlow = { t: 0, start: performance.now(), blower, front: LEAD_SPOT.candles.clone(), inhaled: false, blown: false, done: 0 };
+  if (blower) { blower.target = null; blower.av.faceTarget = new THREE.Vector3(0, 0, 0); }
+  sound.duck(5, 0.25);
+  setStatus(`${josa(ROOF_STATE.owner, '이가')} 소원을 빌고 촛불을 불어요…`, 4000);
+}
+function updateCandleBlow(dt) {
+  const cb = candleBlow;
+  if (!cb) return;
+  cb.t = (performance.now() - cb.start) / 1000; // 실제 시간 기준: 느린 기기도 다른 사람과 같은 박자로
+  const b = cb.blower;
+  // 1) 케이크 앞으로 다가가 숨을 크게 들이쉰다
+  if (b) {
+    const pos = b.av.root.position;
+    const d = pos.distanceTo(cb.front);
+    const step = Math.min(d, dt * 3.5);
+    if (d > 0.02) pos.add(tmp.copy(cb.front).sub(pos).multiplyScalar(step / d));
+    b.speed = d > 0.05 ? 1 : 0;
+    if (b.net && !b.isMe) b.net.copy(pos);
+    const inhale = THREE.MathUtils.smoothstep(cb.t, 0.8, 1.5);
+    b.av.puff = cb.t < 1.55 ? inhale : Math.max(0, 1 - (cb.t - 1.55) * 2.5);
+    b.av.lean = cb.t < 1.55 ? inhale * 0.3 : cb.t < 2.7 ? 1 : Math.max(0, 1 - (cb.t - 2.7) * 2);
+  }
+  if (cb.t > 0.85 && !cb.inhaled) { cb.inhaled = true; sound.inhale(); }
+  // 2) '후~' 입김이 케이크로 날아가고 촛불이 눕다가 하나씩 꺼진다
+  if (cb.t > 1.55 && !cb.blown) {
+    cb.blown = true;
+    sound.blow();
+    const from = b ? b.av.root.position.clone() : new THREE.Vector3(0, 0, 2);
+    const toCake = new THREE.Vector3(-from.x, 0, -from.z).normalize();
+    breath.start(from.clone().add(new THREE.Vector3(0, 0.78, 0)).addScaledVector(toCake, 0.42), new THREE.Vector3(0, 1.85, 0));
+    world.blowOut({ from, snuffCb: () => sound.snuff() });
+  }
+  if (cb.blown && !cb.done && (world.candleState === 'out' || cb.t > 4.5)) { if (world.candleState !== 'out') world.setCandles(false); cb.done = cb.t; }
+  // 3) 잠깐의 정적 뒤 축하
+  if (cb.done && cb.t > cb.done + 0.7) {
+    if (b) { b.av.faceTarget = null; b.av.lean = 0; b.av.puff = 0; b.wait = 3; }
+    candleBlow = null;
+    celebrateCandles();
+  }
+}
+const tmp2 = new THREE.Vector3();
+const tmp3 = new THREE.Vector3();
+function candleCamera(dt) {
+  // 옆에서 보면 주인공이 몸을 숙이는 모습, 입김, 눕는 촛불이 한 화면에 들어온다
+  // 세로 화면에서도 주인공과 케이크가 함께 들어오도록 화면 비율에 맞춰 거리를 정한다
+  // 주인공→케이크 선에 수직인 쪽(카메라 앞쪽)에서 본다
+  const from = candleBlow.blower ? candleBlow.blower.av.root.position : LEAD_SPOT.candles;
+  const mid = tmp2.set(from.x * 0.5, 0, from.z * 0.5);
+  const u = tmp3.set(-from.x, 0, -from.z).normalize();
+  let px = u.z;
+  let pz = -u.x;
+  if (pz < 0) { px = -px; pz = -pz; }
+  const d = camera.aspect < 1 ? 6.2 : 4.2;
+  camPos.lerp(tmp.set(mid.x + px * d, 2.2 + d * 0.18, mid.z + pz * d), Math.min(1, dt * 2.2));
+  camera.position.copy(camPos);
+  camLook.lerp(tmp.set(mid.x, 1.35, mid.z), Math.min(1, dt * 2.5));
+}
+function celebrateCandles() {
+  confetti.burst(new THREE.Vector3(0, 2.1, 0), 220);
   sparks.burst();
+  sound.partyHorn();
+  sound.applause(3.2);
   sound.swell();
-  people.forEach((p, i) => setTimeout(() => p.av.hop(), i * 70));
+  const lead = ceremonyLead();
+  people.forEach((p, i) => setTimeout(() => {
+    p.av.hop();
+    if (p === lead) { p.av.gesture('spin'); setTimeout(() => p.av.gesture('cheer'), 950); } else p.av.gesture('cheer');
+  }, 200 + i * 70));
   setStatus(`${josa(ROOF_STATE.owner, '이가')} 촛불을 껐어요! 생일 축하해요`, 6000);
+  setTimeout(() => endCeremony('candles'), 3000);
 }
 
 // ── 생일 노래 떼창: 주인공이 촛불을 끄기 전에 모두의 화면에 같은 박자로 가사가 흐른다 ──
 let song = null;
 function startSong(atLocal) {
   if (song || ROOF_STATE.candlesOut) return;
+  if (!lite) startCeremony('candles');
   document.querySelector('#btn-candles')?.remove();
   const lines = songLines(ROOF_STATE.owner);
   const el = document.createElement('div');
@@ -1268,14 +1518,18 @@ function updateSong() {
     rows[i].classList.toggle('done', beat >= l.at + l.len);
     rows[i].style.setProperty('--p', `${(p * 100).toFixed(1)}%`);
     // 줄이 바뀔 때마다 다 같이 살짝 뛴다
-    if (beat >= l.at && !song.hopped.has(i)) { song.hopped.add(i); people.forEach((pp, k) => setTimeout(() => pp.av.hop(), k * 40)); }
+    // 줄이 바뀔 때마다 친구들이 박수
+    if (beat >= l.at && !song.hopped.has(i)) { song.hopped.add(i); const lead = ceremonyLead(); people.forEach((pp, k) => { if (pp !== lead) setTimeout(() => pp.av.gesture('clap'), k * 40); }); }
   });
+  // 다 같이 박자에 맞춰 좌우로 흔든다
+  for (const p of people) { p.av.sway = beat > 0 ? Math.min(1, beat) : 0; p.av.swayPhase = beat * Math.PI; }
   song.el.querySelector('.song-title').textContent = beat < 0 ? `${Math.ceil(-beat)}… 다 같이 불러요` : `${ROOF_STATE.owner}에게 불러주는 노래`;
   if (beat > SONG_BEATS + 0.6) {
     const el = song.el;
     song = null;
     el.classList.remove('show');
     setTimeout(() => el.remove(), 500);
+    for (const p of people) p.av.sway = 0;
     blowCandles(true);
   }
 }
@@ -1345,7 +1599,8 @@ function startProcession(owner, { then = null } = {}) {
   if (owner.net) owner.net.copy(from);
   owner.target = null;
   procession = { owner, from, to, t: 0, dur: 9, slots, clap: 0, then };
-  sound.swell();
+  sound.duck(5, 0.2);
+  sound.fanfare();
   setStatus(`${josa(ROOF_STATE.owner, '이가')} 입장해요! 박수로 맞아주세요`, 6000);
   return true;
 }
@@ -1371,6 +1626,9 @@ function updateProcession(dt) {
   spotLight.position.set(op.x, 9, op.z + 2);
   spotLight.target.position.copy(op);
   spotLight.intensity = THREE.MathUtils.lerp(spotLight.intensity, pr.t < pr.dur - 0.8 ? 22 : 0, dt * 3);
+  // 주인공은 걸어 들어오며 손을 흔든다
+  pr.wave = (pr.wave ?? 0.3) - dt;
+  if (pr.wave <= 0 && k > 0 && k < 1) { pr.wave = 1.8; pr.owner.av.gesture('wave'); }
   pr.clap -= dt;
   if (pr.clap <= 0 && pr.slots.size && k > 0 && k < 1) {
     pr.clap = 0.35;
@@ -1444,13 +1702,13 @@ function updateGroupPhoto(dt) {
     groupPhoto.last = label;
     groupPhoto.el.textContent = label;
     groupPhoto.el.classList.toggle('num', /\d/.test(label));
-    if (/\d/.test(label)) sound.click(3 - Number(label));
+    if (/\d/.test(label)) sound.tick(label === '1');
   }
   if (left <= 0 && !groupPhoto.shot) {
     groupPhoto.shot = true;
     groupShotPending = true;
     groupPhoto.el.classList.add('flash');
-    sound.chime();
+    sound.shutter();
   }
   if (left < -1600) {
     for (const p of groupPhoto.slots.keys()) { p.av.faceCamera = false; p.wait = 2 + Math.random() * 3; }
@@ -1503,6 +1761,7 @@ async function saveMemoryCard(btn) {
       thanks: ROOF_STATE.thanks || '',
     });
     track('memory_save');
+    sound.shutter();
     const r = await saveVideo(blob, 'today-hero-memory.jpg');
     if (r === 'downloaded') setStatus('기억 카드를 저장했어요. 파티장이 닫혀도 남아요');
   } catch (e) {
@@ -1529,6 +1788,7 @@ async function savePhoto() {
   if (!blob) return setStatus('사진을 만들지 못했어요. 다시 눌러주세요.');
   track('photo_save');
   const r = await saveVideo(blob, 'saengil-oksang-photo.jpg');
+  sound.shutter();
   if (r === 'downloaded') setStatus('기념사진을 저장했어요. 단톡방이나 스토리에 올려보세요');
 }
 function addPhotoButton() {
@@ -1571,6 +1831,7 @@ const REACT_SYMBOL = { clap: '짝짝', heart: '♥', party: '✦' };
 const floats = [];
 function showReaction(person, kind) {
   sound.react(kind, !!person && person === me);
+  person?.av?.gesture(kind === 'clap' ? 'clap' : kind === 'heart' ? 'heart' : 'cheer');
   const el = document.createElement('span');
   el.className = `react-float react-${kind}`;
   el.textContent = REACT_SYMBOL[kind];
@@ -1583,6 +1844,7 @@ function wireReactions() {
   let tracked = false;
   bar.querySelectorAll('[data-react]').forEach((b) => b.addEventListener('click', () => {
     const kind = b.dataset.react;
+    try { navigator.vibrate?.(12); } catch { /* 진동 없는 기기 */ }
     showReaction(me, kind);
     conn?.send({ t: 'react', kind });
     if (!tracked) { tracked = true; track('react'); }
@@ -1683,6 +1945,7 @@ function wireVenuePicker(root, onPick) {
   root.querySelectorAll('input[name=venue]').forEach((r) => r.addEventListener('change', () => {
     if (!r.checked) return;
     loadVenue(r.value);
+    sound.whoosh();
     root.querySelector('.venue-desc').textContent = VENUES[r.value].desc;
     sound.click?.(2);
     onPick?.(r.value);
@@ -1753,9 +2016,10 @@ function startDemo() {
   igniteBtn.hidden = false;
   // 샘플: 처음 누르면 주인공 민지가 입장 행진을 한 뒤 점등한다
   igniteBtn.addEventListener('click', () => {
-    if (processionDone || QS.get('quick')) return startIgnite();
+    if (QS.get('quick')) return startIgnite();
+    if (processionDone) return startIgnite({ replay: true });
     const minji = addPerson({ name: '민지', color: 0xffc46b, outfit: 'dress' }, world.entrance.clone(), { npc: true, isOwner: true });
-    startProcession(minji, { then: startIgnite });
+    startProcession(minji, { then: () => { igniteCd.demoAt = Date.now() + 3200; } });
   });
   document.querySelector('#btn-lantern').addEventListener('click', () => openLanternSheet(async ({ name, msg, color, rel, years }) => {
     hangLantern({ name: name || '나', msg, color, rel, years }, { from: me.av.root.position.clone().add(new THREE.Vector3(0, 1.6, 0)) });
@@ -1810,7 +2074,7 @@ async function startRoom() {
   const before = serverNow() < ROOF_STATE.igniteAt;
   igniteBtn.hidden = before;
   igniteBtn.textContent = '점등 다시 보기';
-  igniteBtn.addEventListener('click', startIgnite);
+  igniteBtn.addEventListener('click', () => startIgnite({ replay: true }));
 
   if (ROOF_STATE.isOwner && serverNow() < ROOF_STATE.igniteAt - 15_000) {
     return showDoor(data.lanternCount || 0, data.giftCount || 0);
@@ -1920,6 +2184,7 @@ function showDoor(count, giftCount = 0) {
 async function openDoor() {
   const door = document.querySelector('#door');
   door.classList.add('opening');
+  sound.doorOpen();
   try {
     const d = await api(`/api/rooftops/${ROOM_ID}${authQuery()}`);
     for (const l of d.lanterns) hangLantern(l);
@@ -1993,8 +2258,12 @@ function handleNet(m) {
     if (ROOF_STATE.isOwner && me && serverNow() < ROOF_STATE.igniteAt + 60_000) startProcession(me);
   } else if (m.t === 'join') {
     addPeer(m.peer);
-    if (m.peer.owner && !startProcession(peersById.get(m.peer.id))) setStatus(`${josa(ROOF_STATE.owner, '이가')} 파티장에 들어왔어요!`, 6000);
-    else setStatus(`${josa(m.peer.name, '이가')} 파티장에 들어왔어요`, 3000);
+    if (m.peer.owner) {
+      if (!startProcession(peersById.get(m.peer.id))) setStatus(`${josa(ROOF_STATE.owner, '이가')} 파티장에 들어왔어요!`, 6000);
+    } else {
+      sound.doorbell();
+      setStatus(`${josa(m.peer.name, '이가')} 파티장에 들어왔어요`, 3000);
+    }
   } else if (m.t === 'leave') {
     const p = peersById.get(m.id);
     if (p) { removePerson(p); peersById.delete(m.id); }
@@ -2032,7 +2301,7 @@ function handleNet(m) {
     if (m.lantern.by === myId) return; // 내가 단 등불은 이미 걸려 있다
     const who = peersById.get(m.lantern.by);
     const l = hangLantern(m.lantern, { from: who ? who.av.root.position.clone().add(new THREE.Vector3(0, 1.6, 0)) : null });
-    if (l) setStatus(`${josa(m.lantern.name, '이가')} 등불을 달았어요`, 3000);
+    if (l) { sound.lanternUp(false); setStatus(`${josa(m.lantern.name, '이가')} 등불을 달았어요`, 3000); }
   }
 }
 
@@ -2064,6 +2333,7 @@ function frame() {
   if (lite) {
     // 3D를 그리지 않고 점등·노래 시각만 챙긴다
     updateSong();
+    updateIgniteCountdown();
     updateIgnite(dt);
     if (MODE === 'room' && !ignitedThisSession && serverNow() >= ROOF_STATE.igniteAt && !store.get(`seen:${ROOM_ID}`) && serverNow() - ROOF_STATE.igniteAt < 600_000) {
       store.set(`seen:${ROOM_ID}`, true);
@@ -2075,17 +2345,24 @@ function frame() {
 
   if (groupPhoto) updateGroupPhoto(dt);
   else if (procession) updateProcession(dt);
+  else if (ceremony) updateCeremony(dt);
   else {
-    if (me) updateMe(dt);
+    const busy = candleBlow?.blower; // 촛불을 부는 사람은 연출이 움직인다
+    if (me && me !== busy) updateMe(dt);
     for (const p of people) {
+      if (p === busy) continue;
+      // 촛불을 부는 동안 다른 사람은 케이크와 카메라 사이를 비켜 준다
+      if (candleBlow && p.av.root.position.z > 0.2 && p.av.root.position.z < 7) p.av.root.position.z -= dt * 3.5;
       if (p.npc) updateNpc(p, dt);
       else if (!p.isMe) updatePeer(p, dt);
     }
   }
+  updateCandleBlow(dt);
   updateSong();
+  updateIgniteCountdown();
 
   // 내 위치 보내기(초당 10번, 움직였을 때만)
-  if (conn && me && performance.now() - lastSent > 100) {
+  if (conn && me && !ceremony && performance.now() - lastSent > 100) {
     const pos = me.av.root.position;
     if (pos.distanceTo(lastSentPos) > 0.02) {
       conn.send({ t: 'pos', x: pos.x, z: pos.z, dx: me.dirX });
@@ -2109,6 +2386,8 @@ function frame() {
     camera.position.x += 0.9; // 돔 뼈대가 화면 한가운데를 가리지 않게 살짝 비켜서
     camLook.set(0, 3.2, 0);
   } else if (procession) processionCamera(dt);
+  else if (candleBlow) candleCamera(dt);
+  else if (ceremony) ceremonyCamera(dt);
   else if (groupPhoto) {
     camPos.lerp(PHOTO_CAM, Math.min(1, dt * 3));
     camera.position.copy(camPos);
@@ -2166,6 +2445,9 @@ function frame() {
   gifts.update(dt, t, { camera, viewHeight: renderer.domElement.height });
   updateIgnite(dt);
   sparks.update(dt);
+  confetti.update(dt);
+  aura.update(t);
+  breath.update(dt);
   meteors.update(dt, camera);
   updateFloats(dt);
   composer.render();
@@ -2204,6 +2486,8 @@ window.__lantern = {
   get skyOpacity() { return skyName ? skyName.material.opacity : 0; },
   get igniting() { return !!ignite; },
   get candlesOut() { return ROOF_STATE.candlesOut; },
+  get candleState() { return world.candleState; },
+  get blowT() { return candleBlow ? candleBlow.t : -1; },
   get thanks() { return ROOF_STATE.thanks; },
   get spectator() { return ROOF_STATE.spectator; },
   get photoReady() { return !!photoShot; },

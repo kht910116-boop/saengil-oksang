@@ -471,3 +471,32 @@ body.lite #lite {
 #lite.lit .lite-state { color: #b46a00; text-shadow: 0 0 12px rgba(255, 196, 107, 0.8); animation: lite-glow 2.4s ease-in-out infinite; }
 @keyframes lite-glow { 50% { text-shadow: 0 0 22px rgba(255, 196, 107, 1); } }
 #lite .lite-empty { color: #7a6f8a; font-size: 14px; list-style: none; }
+
+/* 점등 직전 카운트다운 */
+#ignite-cd {
+  position: fixed; inset: 0; z-index: 7; display: flex; align-items: center; justify-content: center; pointer-events: none;
+  font-family: 'Jua', sans-serif; font-size: 160px; color: #fff3d6;
+  text-shadow: 0 0 40px rgba(255, 196, 107, 0.9), 0 6px 30px rgba(10, 8, 20, 0.6);
+  animation: cd-pop 1s ease-out;
+}
+
+/* 의식(점등식·촛불 끄기) 중에는 걷기·등불·선물을 잠그고 하트·별·박수만 크게 */
+body.ceremony .actions, body.ceremony #joystick, body.ceremony #goal, body.ceremony #cta,
+body.ceremony #btn-group, body.ceremony #btn-venue, body.ceremony #btn-letters, body.ceremony #btn-invite,
+body.ceremony #btn-manage, body.ceremony #btn-lite, body.ceremony #btn-photo, body.ceremony #btn-candles { display: none !important; }
+body.ceremony #reactions {
+  left: 50%; right: auto; bottom: calc(22px + var(--safe-b)); transform: translateX(-50%);
+  flex-direction: row; gap: 14px; padding: 8px 12px; border-radius: 40px; background: rgba(23, 27, 54, 0.45);
+}
+body.ceremony #reactions button { width: 60px; height: 60px; font-size: 15px; }
+body.ceremony #reactions [data-react="heart"], body.ceremony #reactions [data-react="party"] { font-size: 26px; }
+#reactions button:active { transform: scale(0.9); }
+#ceremony-hint {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(100px + var(--safe-b)); z-index: 3; margin: 0;
+  padding: 7px 14px; border-radius: 20px; background: var(--glass); color: var(--paper); font-size: 13.5px; white-space: nowrap;
+  border: 1px solid var(--line); pointer-events: none; animation: hint-in .5s ease-out;
+}
+@keyframes hint-in { from { opacity: 0; transform: translate(-50%, 8px); } }
+/* 점등 순간 하늘을 볼 때는 이름표를 잠시 숨겨 화면을 비운다 */
+#labels { transition: opacity .6s; }
+body.is-igniting.ceremony #labels { opacity: 0; }

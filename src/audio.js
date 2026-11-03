@@ -29,27 +29,146 @@ function tone(freq, start, dur, { type = 'sine', gain = 0.18, to = 0, glide = 0.
   o.stop(start + dur + 0.05);
 }
 
-function startAmbient() {
-  // 멀리서 들리는 도시 소리: 낮게 거른 잡음
-  const len = ctx.sampleRate * 2;
+// 맑은 종소리: 기본음과 배음(2.76배)을 함께 울린다
+function bell(freq, start, gain = 0.08) {
+  tone(freq, start, 1.6, { type: 'sine', gain });
+  tone(freq * 2.76, start, 0.5, { type: 'sine', gain: gain * 0.25 });
+  tone(freq * 2, start, 0.9, { type: 'triangle', gain: gain * 0.15 });
+}
+
+// 잡음 한 덩어리(반복용)
+function noiseBuffer(sec, brown = true) {
+  const len = Math.floor(ctx.sampleRate * sec);
   const buf = ctx.createBuffer(1, len, ctx.sampleRate);
   const d = buf.getChannelData(0);
   let last = 0;
   for (let i = 0; i < len; i++) {
-    last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02;
-    d[i] = last * 3;
+    const w = Math.random() * 2 - 1;
+    if (brown) { last = (last + 0.02 * w) / 1.02; d[i] = last * 3; } else d[i] = w;
   }
+  return buf;
+}
+function noiseLoop(filterType, freq, gain, { brown = true, q = 0.7 } = {}) {
   const src = ctx.createBufferSource();
-  src.buffer = buf;
+  src.buffer = noiseBuffer(3, brown);
   src.loop = true;
   const f = ctx.createBiquadFilter();
-  f.type = 'lowpass';
-  f.frequency.value = 380;
+  f.type = filterType;
+  f.frequency.value = freq;
+  f.Q.value = q;
   const g = ctx.createGain();
-  g.gain.value = 0.22;
-  src.connect(f).connect(g).connect(master);
+  g.gain.value = gain;
+  src.connect(f).connect(g).connect(ambientBus);
   src.start();
-  ambient = { src, g };
+  ambientNodes.push(src);
+  return { src, f, g };
+}
+// 느리게 출렁이는 값(바람·파도)
+function lfo(param, rate, depth) {
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.frequency.value = rate;
+  g.gain.value = depth;
+  o.connect(g).connect(param);
+  o.start();
+  ambientNodes.push(o);
+  return o;
+}
+
+// 장소마다 다른 배경 소리(파일 없이 코드로): 도시 소음 · 파도 · 눈바람과 장작 · 높은 바람과 열기구 버너 · 우주선 웅웅거림
+let ambientBus = null;
+let ambientVenue = 'rooftop';
+let ambientTimer = null;
+let ambientNodes = []; // 장소를 바꿀 때 멈출 소리 원천들
+const AMBIENCES = {
+  rooftop() {
+    noiseLoop('lowpass', 380, 0.22);
+    return () => { if (Math.random() < 0.3) tone(330 + Math.random() * 60, ctx.currentTime, 0.9, { type: 'sine', gain: 0.012, to: 300, glide: 0.8 }); }; // 먼 자동차 경적
+  },
+  cruise() {
+    const w = noiseLoop('lowpass', 520, 0.18);
+    lfo(w.g.gain, 0.11, 0.12); // 밀려왔다 빠지는 파도
+    lfo(w.f.frequency, 0.11, 260);
+    const hiss = noiseLoop('highpass', 2500, 0.012, { brown: false });
+    lfo(hiss.g.gain, 0.11, 0.01);
+    return () => {
+      // 먼 뱃고동
+      if (Math.random() < 0.35) {
+        const t = ctx.currentTime;
+        [98, 98 * 1.5].forEach((f) => tone(f, t, 2.6, { type: 'sawtooth', gain: 0.012 }));
+      }
+    };
+  },
+  aurora() {
+    const wind = noiseLoop('bandpass', 500, 0.16, { q: 1.4 });
+    lfo(wind.f.frequency, 0.07, 280); // 휘이잉 높낮이가 바뀌는 눈바람
+    lfo(wind.g.gain, 0.05, 0.08);
+    return () => { // 벽난로 장작 타닥
+      const t = ctx.currentTime;
+      for (let i = 0; i < 4 + Math.random() * 6; i++) noiseBurst(t + Math.random() * 1.5, 0.015, 0.03 + Math.random() * 0.03, 2500 + Math.random() * 2000);
+    };
+  },
+  sky() {
+    const wind = noiseLoop('bandpass', 900, 0.08, { q: 0.9 });
+    lfo(wind.f.frequency, 0.05, 400);
+    return () => { // 열기구 버너가 '화르르'
+      if (Math.random() < 0.5) {
+        const t = ctx.currentTime;
+        sweep(t, 1.3, 0.09, 300, 700, 'lowpass', false);
+      }
+    };
+  },
+  space() {
+    const t = ctx.currentTime;
+    for (const [f, gn] of [[55, 0.05], [55.6, 0.04], [82.5, 0.025]]) {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.frequency.value = f;
+      g.gain.value = gn;
+      o.connect(g).connect(ambientBus);
+      o.start(t);
+      ambientNodes.push(o);
+    }
+    noiseLoop('lowpass', 160, 0.1); // 우주선 공기 순환 소리
+    return () => { // 먼 무전 삐빅
+      if (Math.random() < 0.4) [1320, 1760].forEach((f, i) => tone(f, ctx.currentTime + i * 0.09, 0.07, { type: 'square', gain: 0.008 }));
+    };
+  },
+};
+function startAmbient() {
+  if (ambientBus) {
+    const old = ambientBus;
+    const oldNodes = ambientNodes;
+    old.gain.setTargetAtTime(0, ctx.currentTime, 0.4);
+    setTimeout(() => { for (const n of oldNodes) { try { n.stop(); } catch { /* 이미 멈춤 */ } } old.disconnect(); }, 2000);
+  }
+  ambientNodes = [];
+  clearInterval(ambientTimer);
+  ambientBus = ctx.createGain();
+  ambientBus.gain.value = 0;
+  ambientBus.connect(master);
+  ambientBus.gain.setTargetAtTime(1, ctx.currentTime, 0.6);
+  const event = (AMBIENCES[ambientVenue] || AMBIENCES.rooftop)();
+  ambientTimer = setInterval(() => { if (on) event?.(); }, 9000 + Math.random() * 4000);
+  ambient = true;
+}
+
+// 잡음을 거르는 주파수를 움직이며 내는 소리(바람·입김·쉭)
+function sweep(start, dur, gain, f0, f1, type = 'bandpass', white = true, q = 1) {
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuffer(dur + 0.1, !white);
+  const f = ctx.createBiquadFilter();
+  f.type = type;
+  f.Q.value = q;
+  f.frequency.setValueAtTime(f0, start);
+  f.frequency.exponentialRampToValueAtTime(f1, start + dur);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, start);
+  g.gain.exponentialRampToValueAtTime(gain, start + dur * 0.25);
+  g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+  src.connect(f).connect(g).connect(master);
+  src.start(start);
+  src.stop(start + dur + 0.1);
 }
 
 // BGM: 상황마다 다른 곡을 부드럽게 바꿔 튼다. 파일이 없으면 조용히 넘어간다.
@@ -133,6 +252,7 @@ export const sound = {
     on = !on;
     master.gain.setTargetAtTime(on ? 0.8 : 0, ctx.currentTime, 0.1);
     if (on && !ambient) startAmbient();
+    if (ambientBus) ambientBus.gain.setTargetAtTime(on ? 1 : 0, ctx.currentTime, 0.3);
     applyMusic();
     return on;
   },
@@ -197,6 +317,141 @@ export const sound = {
       [1568, 2093, 2637, 3136].forEach((f, i) => tone(f, t + i * 0.045, 0.45, { type: 'triangle', gain: 0.05 * v }));
       for (let i = 0; i < 6; i++) noiseBurst(t + 0.05 + Math.random() * 0.3, 0.02, 0.025 * v, 6000 + Math.random() * 3000);
     }
+  },
+  // 중요한 순간(입장 팡파르, 촛불 끄기)에는 배경 음악을 잠깐 작게
+  duck(sec = 3, to = 0.2) {
+    if (!on || !wanted || !players[wanted]) return;
+    const a = players[wanted];
+    const name = wanted;
+    fade(a, TRACKS[name].volume * to, 400);
+    clearTimeout(a._duck);
+    a._duck = setTimeout(() => { if (on && wanted === name) fade(a, TRACKS[name].volume, 1500); }, sec * 1000);
+  },
+  // 장소를 바꾸면 배경 소리도 바뀐다
+  setVenue(id) {
+    if (id === ambientVenue) return;
+    ambientVenue = id;
+    if (ctx && on) startAmbient();
+  },
+  // 등불이 날아오를 때 '슈욱', 자리에 걸리면 맑은 종소리
+  lanternUp(mine = true) {
+    if (!on) return;
+    const t = ctx.currentTime;
+    const v = mine ? 1 : 0.5;
+    sweep(t, 0.9, 0.06 * v, 400, 2400, 'bandpass', true, 2);
+    bell(1046.5, t + 1.25, 0.09 * v);
+    bell(1568, t + 1.33, 0.05 * v);
+  },
+  // 등불·선물을 눌러 말을 볼 때: 종이 넘기는 가벼운 소리
+  paper() {
+    if (!on) return;
+    const t = ctx.currentTime;
+    sweep(t, 0.12, 0.05, 3000, 6000, 'highpass', true);
+    tone(1760, t + 0.02, 0.12, { type: 'triangle', gain: 0.03 });
+  },
+  // 선물이 도착했을 때(종류마다 다르게)
+  gift(item) {
+    if (!on) return;
+    const t = ctx.currentTime;
+    if (item === 'balloons') { // 고무풍선 '뾰옹'
+      tone(380, t, 0.25, { type: 'sine', gain: 0.12, to: 900, glide: 0.18 });
+      tone(760, t + 0.05, 0.2, { type: 'triangle', gain: 0.03, to: 1500, glide: 0.15 });
+    } else if (item === 'topping') { // 케이크에 '톡'
+      tone(420, t, 0.16, { type: 'sine', gain: 0.16, to: 180, glide: 0.1 });
+      bell(2093, t + 0.06, 0.03);
+    } else { // 불꽃: 올라가는 휘파람
+      tone(900, t, 0.6, { type: 'sine', gain: 0.03, to: 2200, glide: 0.55 });
+    }
+    bell(1318.5, t + 0.12, 0.05);
+  },
+  // 친구가 들어올 때 '딩동'(작게)
+  doorbell() {
+    if (!on) return;
+    const t = ctx.currentTime;
+    bell(659.3, t, 0.05);
+    bell(523.3, t + 0.22, 0.05);
+  },
+  // 주인공 문이 열릴 때: 묵직한 문소리와 따뜻한 화음
+  doorOpen() {
+    if (!on) return;
+    const t = ctx.currentTime;
+    tone(92, t, 1.2, { type: 'sawtooth', gain: 0.03, to: 64, glide: 1.0 });
+    sweep(t, 1.2, 0.05, 200, 900, 'bandpass', false, 3);
+    [392, 523.3, 659.3, 784].forEach((f, i) => tone(f, t + 0.6 + i * 0.08, 2.4, { type: 'sine', gain: 0.07 }));
+  },
+  // 입장 행진: 작은 북 연타 뒤 팡파르
+  fanfare(delay = 0) {
+    if (!on) return;
+    const t = ctx.currentTime + delay;
+    for (let i = 0; i < 26; i++) noiseBurst(t + i * 0.055, 0.04, 0.03 + (i / 26) * 0.09, 700 + Math.random() * 300);
+    const f0 = t + 1.5;
+    const notes = [[523.3, 0, 0.18], [523.3, 0.2, 0.18], [523.3, 0.4, 0.18], [659.3, 0.6, 0.5], [587.3, 1.1, 0.25], [659.3, 1.35, 0.25], [784, 1.6, 1.4]];
+    for (const [f, at, len] of notes) {
+      tone(f, f0 + at, len + 0.3, { type: 'sawtooth', gain: 0.035 });
+      tone(f, f0 + at, len + 0.3, { type: 'square', gain: 0.02 });
+      tone(f / 2, f0 + at, len + 0.3, { type: 'triangle', gain: 0.05 });
+    }
+    noiseBurst(f0 + 1.6, 0.6, 0.06, 5000); // 심벌즈
+  },
+  // 점등 직전 5초: 나무 딱따기 소리(마지막은 더 크게)
+  tick(strong = false) {
+    if (!on) return;
+    const t = ctx.currentTime;
+    tone(strong ? 1568 : 1175, t, 0.09, { type: 'sine', gain: strong ? 0.2 : 0.12 });
+    noiseBurst(t, 0.02, 0.05, 3000);
+  },
+  // 사진 찰칵
+  shutter() {
+    if (!on) return;
+    const t = ctx.currentTime;
+    noiseBurst(t, 0.03, 0.2, 2500);
+    noiseBurst(t + 0.07, 0.05, 0.14, 1800);
+    tone(2400, t, 0.04, { type: 'square', gain: 0.015 });
+  },
+  // 촛불 끄기: 숨 들이쉬기 → '후~' → 심지가 꺼지는 '칙'
+  inhale() {
+    if (!on) return;
+    sweep(ctx.currentTime, 0.55, 0.04, 600, 1600, 'bandpass', true, 1.2);
+  },
+  blow() {
+    if (!on) return;
+    const t = ctx.currentTime;
+    sweep(t, 1.0, 0.16, 1400, 380, 'lowpass', true, 0.6);
+    sweep(t, 0.9, 0.05, 900, 500, 'bandpass', true, 2);
+  },
+  snuff() {
+    if (!on) return;
+    sweep(ctx.currentTime, 0.18, 0.03, 5000, 2500, 'highpass', true);
+  },
+  // 박수 소리(여러 사람)
+  applause(dur = 2.6, amount = 1) {
+    if (!on) return;
+    const t = ctx.currentTime;
+    const n = Math.floor(dur * 34 * amount);
+    for (let i = 0; i < n; i++) {
+      const at = Math.random() * dur;
+      const env = Math.min(1, at / 0.3) * Math.min(1, (dur - at) / 0.8);
+      noiseBurst(t + at, 0.03, (0.05 + Math.random() * 0.07) * env, 900 + Math.random() * 1600);
+    }
+  },
+  // 파티 나팔 '뿌우~'
+  partyHorn() {
+    if (!on) return;
+    const t = ctx.currentTime;
+    tone(440, t, 0.7, { type: 'sawtooth', gain: 0.03, to: 520, glide: 0.5 });
+    tone(443, t, 0.7, { type: 'square', gain: 0.02, to: 524, glide: 0.5 });
+    noiseBurst(t + 0.05, 0.3, 0.03, 4000); // 종이 나팔 펼쳐지는 소리
+  },
+  // 파티장이 닫힐 때: 오르골이 천천히 내려간다
+  closing() {
+    if (!on) return;
+    const t = ctx.currentTime;
+    [1046.5, 880, 784, 659.3, 587.3, 523.3].forEach((f, i) => bell(f, t + i * 0.42, 0.06));
+  },
+  // 장소 바꾸기 '휙'
+  whoosh() {
+    if (!on) return;
+    sweep(ctx.currentTime, 0.5, 0.05, 300, 3000, 'bandpass', true, 1.5);
   },
   chime() {
     if (!on) return;

@@ -114,7 +114,7 @@ const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
     await owner.click('#btn-candles');
     await f1.waitForFunction(() => window.__lantern.candlesOut, null, { timeout: 45000 });
     ok(true, '주인공이 촛불을 끄자 생일 노래 뒤 친구 화면에서도 꺼짐');
-    await owner.click('#btn-letters');
+    await owner.click('#btn-letters', { timeout: 60000 }); // 촛불 의식이 끝나면 버튼이 다시 보인다
     await owner.waitForSelector('[data-thanks]');
     await owner.click('[data-thanks="0"]');
     await f1.waitForFunction(() => window.__lantern.thanks, null, { timeout: 20000 });
