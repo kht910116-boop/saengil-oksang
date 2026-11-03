@@ -15,11 +15,12 @@ function ensure() {
   return ctx;
 }
 
-function tone(freq, start, dur, { type = 'sine', gain = 0.18 } = {}) {
+function tone(freq, start, dur, { type = 'sine', gain = 0.18, to = 0, glide = 0.12 } = {}) {
   const o = ctx.createOscillator();
   const g = ctx.createGain();
   o.type = type;
-  o.frequency.value = freq;
+  o.frequency.setValueAtTime(freq, start);
+  if (to) o.frequency.exponentialRampToValueAtTime(to, start + glide); // 음이 미끄러지듯 올라가거나 내려간다
   g.gain.setValueAtTime(0, start);
   g.gain.linearRampToValueAtTime(gain, start + 0.015);
   g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
@@ -122,6 +123,8 @@ function noiseBurst(start, dur, gain, freq) {
   src.start(start);
 }
 
+const reactLast = {};
+
 export const sound = {
   get enabled() { return on; },
   async toggle() {
@@ -169,6 +172,31 @@ export const sound = {
     if (!on) return;
     const t = ctx.currentTime;
     for (let i = 0; i < 26; i++) noiseBurst(t + Math.random() * 0.9, 0.025, 0.04 + Math.random() * 0.03, 3000 + Math.random() * 3000);
+  },
+  // 리액션 효과음: 짝짝(박수 두 번), 하트(말랑하게 올라가는 '뿅'), 별(반짝이는 높은 음)
+  // 내가 누른 건 또렷하게, 다른 사람 것은 작게. 많은 사람이 동시에 눌러도 시끄럽지 않게 간격을 둔다.
+  react(kind, mine = false) {
+    if (!on) return;
+    const now = ctx.currentTime;
+    const last = reactLast[kind] || 0;
+    if (now - last < (mine ? 0.06 : 0.14)) return;
+    reactLast[kind] = now;
+    const v = mine ? 1 : 0.45;
+    const t = now + 0.005;
+    if (kind === 'clap') {
+      for (const off of [0, 0.13]) {
+        // 손뼉 한 번 = 아주 짧은 잡음 몇 겹(손바닥 여러 군데가 부딪히는 느낌)
+        for (let k = 0; k < 3; k++) noiseBurst(t + off + k * 0.008, 0.045, 0.22 * v, 1100 + Math.random() * 900);
+        noiseBurst(t + off, 0.12, 0.05 * v, 2400);
+      }
+    } else if (kind === 'heart') {
+      tone(520, t, 0.28, { type: 'sine', gain: 0.16 * v, to: 780, glide: 0.1 });
+      tone(780, t + 0.11, 0.38, { type: 'sine', gain: 0.13 * v, to: 1040, glide: 0.12 });
+      tone(1560, t + 0.11, 0.3, { type: 'triangle', gain: 0.025 * v });
+    } else if (kind === 'party') {
+      [1568, 2093, 2637, 3136].forEach((f, i) => tone(f, t + i * 0.045, 0.45, { type: 'triangle', gain: 0.05 * v }));
+      for (let i = 0; i < 6; i++) noiseBurst(t + 0.05 + Math.random() * 0.3, 0.02, 0.025 * v, 6000 + Math.random() * 3000);
+    }
   },
   chime() {
     if (!on) return;

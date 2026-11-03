@@ -1570,6 +1570,7 @@ document.querySelector('#cta a')?.addEventListener('click', () => track('cta_cli
 const REACT_SYMBOL = { clap: '짝짝', heart: '♥', party: '✦' };
 const floats = [];
 function showReaction(person, kind) {
+  sound.react(kind, !!person && person === me);
   const el = document.createElement('span');
   el.className = `react-float react-${kind}`;
   el.textContent = REACT_SYMBOL[kind];
