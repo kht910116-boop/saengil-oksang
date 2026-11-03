@@ -144,7 +144,8 @@ function adaptQuality(dt) {
     if (perf.level === 1) renderer.setPixelRatio(1);
     if (perf.level === 2) bloomPass.enabled = false;
     // 그래도 버벅이면 가볍게 보기를 권한다(한 번만)
-    if (perf.level === 3 && !sheet.classList.contains('open') && !song && !procession && !groupPhoto && MODE !== 'landing') {
+    if (perf.level === 3 && !sheet.classList.contains('open') && !song && !procession && !groupPhoto && MODE !== 'landing' && !store.get('lite-asked')) {
+      store.set('lite-asked', true); // 기기마다 한 번만 묻는다
       openSheet('<h2>화면이 버벅이나요?</h2><p class="sheet-lead">이 휴대폰에서는 3D 화면이 무거울 수 있어요. 가볍게 보기로 바꾸면 등불 목록과 점등 소식만 보여요. 등불 달기와 선물은 그대로 할 수 있어요.</p><button class="btn primary wide" id="go-lite">가볍게 보기로 바꾸기</button>');
       sheetBody.querySelector('#go-lite').addEventListener('click', () => { closeSheet(); setLite(true); track('lite_on'); });
     }

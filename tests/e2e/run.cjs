@@ -33,6 +33,8 @@ const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
   const pages = [];
   const mk = async () => {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, acceptDownloads: true });
+    // 느린 시험 브라우저에서 '가볍게 보기' 권유 창이 버튼을 가리지 않게
+    await ctx.addInitScript(() => { try { localStorage.setItem('lite-asked', 'true'); } catch {} });
     const p = await ctx.newPage();
     p.errs = [];
     p.on('pageerror', (e) => p.errs.push(e.message));
@@ -121,6 +123,8 @@ const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 
     log('6. 기념사진 저장, "내 파티 만들기"');
     await f1.waitForSelector('#btn-photo', { timeout: 120000 });
+    await f1.evaluate(() => { const s = document.querySelector('#sheet'); if (s.classList.contains('open') && !s.classList.contains('locked')) s.querySelector('.sheet-close').click(); });
+    await f1.waitForTimeout(400);
     const [dl] = await Promise.all([f1.waitForEvent('download', { timeout: 30000 }).catch(() => null), f1.click('#btn-photo')]);
     ok(dl && (await dl.suggestedFilename()).endsWith('.jpg'), '기념사진(jpg) 저장');
     if (dl) await dl.saveAs(path.join(OUT, 'e2e-photo.jpg'));
