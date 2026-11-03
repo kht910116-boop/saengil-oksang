@@ -134,6 +134,16 @@ test('캐릭터 동작·장소 놀거리: 목록에 있는 것만 중계, 도배
   b.close();
 });
 
+test('이상한 실시간 메시지로 서버가 꺼지지 않음', async () => {
+  const { data: roof } = await create();
+  const ws = new WebSocket(`ws://localhost:${PORT}/ws?room=${roof.id}`);
+  await new Promise((r) => ws.on('open', r));
+  for (const bad of ['null', '42', '[]', '"x"', '{"t":"join","name":{"toString":1}}', '{"t":"pos","x":{"valueOf":1}}', '{"t":"gmo","kind":"hug","ids":[{"a":1}]}']) ws.send(bad);
+  await new Promise((r) => setTimeout(r, 300));
+  ws.close();
+  assert.equal((await fetch(`${BASE}/healthz`)).status, 200, '서버가 살아 있어야 함');
+});
+
 test('점등 알림: 키 공개, 구독 검사, 파티장과 함께 삭제', async () => {
   const key = await call('GET', '/api/push/key');
   assert.equal(key.status, 200);

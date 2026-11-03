@@ -25,7 +25,8 @@ export function connectRoom({ room, key, hostKey, hello, onMessage, onClose }) {
   let closedByUs = false;
   let retry = 0;
   const api = {
-    send(msg) { if (ws?.readyState === 1) ws.send(JSON.stringify(msg)); },
+    // 보냈으면 true(연결 중이라 못 보내면 false → 부르는 쪽이 다시 보낼 수 있다)
+    send(msg) { if (ws?.readyState === 1) { ws.send(JSON.stringify(msg)); return true; } return false; },
     close() { closedByUs = true; ws?.close(); },
   };
   const open = () => {
@@ -34,7 +35,8 @@ export function connectRoom({ room, key, hostKey, hello, onMessage, onClose }) {
     ws.onmessage = (e) => { try { onMessage(JSON.parse(e.data)); } catch { /* 무시 */ } };
     ws.onclose = (e) => {
       if (closedByUs) return;
-      const fatal = e.code === 4001 || e.code === 4002 || e.code === 4003 || e.code === 4004;
+      // 4001(문이 아직 안 열림)은 시계 차이로 생길 수 있어 잠시 뒤 다시 시도한다
+      const fatal = e.code === 4002 || e.code === 4003 || e.code === 4004;
       onClose?.(e.code, fatal);
       if (!fatal) setTimeout(open, Math.min(8000, 800 * 2 ** retry++));
     };

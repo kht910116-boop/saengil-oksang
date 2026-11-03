@@ -466,6 +466,16 @@ export function createAvatar({ props: propTheme = null, color = 0xf29bb3, hat = 
     swayPhase: 0, // 흔들기 박자(모두 같은 값을 주면 다 같이 흔든다)
     // 몸짓: clap(박수) · heart(머리 위 하트) · cheer(만세) · wave(손 흔들기) · spin(한 바퀴)
     gesture(kind) { hideProps(); gestureKind = kind; gestureT = 0; },
+    // 떠난 사람의 인형이 쓰던 그래픽 메모리를 돌려준다(여럿이 같이 쓰는 모양·재료는 남긴다)
+    dispose() {
+      const sharedMats = new Set([...softCache.values(), GOLD_MAT, inkMat, WHITE_MAT, cheekMat]);
+      const sharedGeos = new Set([bodyGeo, limbGeo, footGeo, eyeGeo, cheekGeo, mouthGeo]);
+      root.traverse((o) => {
+        if (o.geometry && !sharedGeos.has(o.geometry)) o.geometry.dispose();
+        const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+        for (const m of mats) if (!sharedMats.has(m)) m.dispose();
+      });
+    },
     setProps(t) { propKinds = { eat: 'cupcake', drink: 'cup', ...(t || {}) }; },
     // 계속 유지하는 자세: sit(앉기) · lie(벌러덩) · sleep(졸기) · dance(춤). 걸으면 풀린다.
     pose: null,

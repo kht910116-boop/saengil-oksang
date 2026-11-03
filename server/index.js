@@ -670,10 +670,14 @@ server.on('upgrade', (req, socket, head) => {
     if (room.size >= SOCKET_CAP) return ws.close(4002, 'full');
     const peer = { id: crypto.randomBytes(4).toString('hex'), ws, isOwner, joined: false, spectator: false, name: '', color: 0xf29bb3, hat: 0, outfit: DEFAULT_OUTFIT, x: 0, z: 3, dx: 0, dirty: false, last: 0, lastHop: 0, lastReact: 0 };
     room.set(peer.id, peer);
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
 
     ws.on('message', (raw) => {
       let msg;
       try { msg = JSON.parse(raw); } catch { return; }
+      if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return; // null·숫자·배열 같은 이상한 메시지는 무시
+      try {
       if (msg.t === 'join' && !peer.joined) {
         // 아바타 자리가 다 찼으면 구경 모드(주인공은 언제나 아바타로). 자기 자신은 세기 전에 판단한다.
         peer.spectator = !isOwner && avatarCount(room) >= ROOM_CAP;
@@ -738,6 +742,7 @@ server.on('upgrade', (req, socket, head) => {
         peer.lastReact = now;
         broadcast(roof.id, { t: 'react', id: peer.spectator ? null : peer.id, kind: msg.kind }, peer.id);
       }
+      } catch (e) { console.warn('실시간 메시지 처리 실패', e.message); } // 메시지 하나 때문에 서버가 꺼지지 않게
     });
     ws.on('close', () => {
       room.delete(peer.id);
@@ -754,6 +759,14 @@ function view(p) {
   return { id: p.id, name: p.name, color: p.color, hat: p.hat, outfit: p.outfit, acc: p.acc || 'none', x: p.x, z: p.z, owner: p.isOwner };
 }
 const REACTIONS = new Set(['clap', 'heart', 'party']);
+// 연결 확인: 20초마다 핑을 보내고, 대답 없는 연결(전화가 끊긴 휴대폰 등)은 끊어서 유령 아바타가 남지 않게 한다
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.isAlive === false) { ws.terminate(); continue; }
+    ws.isAlive = false;
+    try { ws.ping(); } catch { /* 이미 끊김 */ }
+  }
+}, Number(process.env.WS_PING_MS) || 20_000).unref();
 const GROUP_MOTIONS = new Set(['highfive', 'hug', 'ring', 'conga', 'selfie']);
 const EMOTES = new Set(['hop', 'sit', 'wave', 'dance', 'bow', 'flip', 'spin', 'cheer', 'wiggle', 'surprise', 'cry', 'stretch', 'lie', 'sleep', 'heart', 'eat', 'cheers']);
 const FX_IDS = new Set(['horn', 'wheel', 'aurora', 'snowman', 'fire', 'ride1', 'ride2', 'ride3', 'bell', 'tpA', 'tpB', 'disco']);

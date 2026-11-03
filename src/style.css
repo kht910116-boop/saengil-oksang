@@ -550,3 +550,4 @@ body.ceremony #emotes, body.ceremony #reactions [data-emote-open] { display: non
 #emotes .emote-sub { grid-column: 1 / -1; margin: 6px 0 0; font-size: 12px; color: #7a6f8a; }
 #emotes .gm { background: #ffe1a8; }
 #emotes .gm:disabled { opacity: 0.4; }
+#song .song-sound { pointer-events: auto; margin-top: 6px; border: 0; border-radius: 16px; padding: 7px 14px; background: var(--bulb); color: var(--ink); font: inherit; font-size: 13.5px; }

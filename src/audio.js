@@ -1,4 +1,4 @@
-import { MELODY, BASS, BEAT, LEAD_IN, SONG_SECONDS } from './song.js';
+import { MELODY, BEAT, LEAD_IN, SONG_SECONDS, SONG_BEATS, CHORDS } from './song.js';
 
 // 효과음은 코드로 합성하고, BGM은 public/audio/ 의 mp3 파일을 상황별로 튼다(BGM_GUIDE.md 참고).
 let ctx = null;
@@ -15,7 +15,8 @@ function ensure() {
   return ctx;
 }
 
-function tone(freq, start, dur, { type = 'sine', gain = 0.18, to = 0, glide = 0.12 } = {}) {
+function tone(freq, start, dur, { type = 'sine', gain = 0.18, to = 0, glide = 0.12, dest = null } = {}) {
+  if (start < ctx.currentTime - 0.03) return; // 이미 지난 음은 건너뛴다(노래 중간에 소리를 켠 경우)
   const o = ctx.createOscillator();
   const g = ctx.createGain();
   o.type = type;
@@ -24,7 +25,7 @@ function tone(freq, start, dur, { type = 'sine', gain = 0.18, to = 0, glide = 0.
   g.gain.setValueAtTime(0, start);
   g.gain.linearRampToValueAtTime(gain, start + 0.015);
   g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
-  o.connect(g).connect(master);
+  o.connect(g).connect(dest || master);
   o.start(start);
   o.stop(start + dur + 0.05);
 }
@@ -34,6 +35,19 @@ function bell(freq, start, gain = 0.08) {
   tone(freq, start, 1.6, { type: 'sine', gain });
   tone(freq * 2.76, start, 0.5, { type: 'sine', gain: gain * 0.25 });
   tone(freq * 2, start, 0.9, { type: 'triangle', gain: gain * 0.15 });
+}
+
+// 작은 방 울림(잔향) 한 번 만들어 계속 쓴다
+let impulse = null;
+function roomImpulse() {
+  if (impulse) return impulse;
+  const len = Math.floor(ctx.sampleRate * 1.6);
+  impulse = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = impulse.getChannelData(ch);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+  }
+  return impulse;
 }
 
 // 잡음 한 덩어리(반복용)
@@ -261,6 +275,12 @@ function noiseBurst(start, dur, gain, freq) {
 }
 
 const reactLast = {};
+// 휴대폰이 잠기거나 전화가 와서 소리가 멈추면, 돌아와 화면을 만질 때 다시 켠다(소리를 켜 둔 경우만)
+const wake = () => { if (on && ctx && ctx.state !== 'running') ctx.resume().catch(() => {}); };
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
+  document.addEventListener('pointerdown', wake, { passive: true });
+}
 
 export const sound = {
   get enabled() { return on; },
@@ -268,7 +288,7 @@ export const sound = {
     ensure();
     // 아이폰은 화면을 누른 그 순간에 재생을 시작해야 소리가 난다(기다린 뒤에 틀면 막힘)
     if (!on && wanted && TRACKS[wanted]) { try { const a = player(wanted); a.play().catch(() => {}); } catch { /* 다음에 다시 */ } }
-    if (ctx.state === 'suspended') await ctx.resume();
+    if (ctx.state !== 'running') { try { await ctx.resume(); } catch { /* 다음 터치 때 다시 */ } } // 아이폰 'interrupted' 상태 포함
     on = !on;
     master.gain.setTargetAtTime(on ? 0.8 : 0, ctx.currentTime, 0.1);
     if (on && !ambient) startAmbient();
@@ -550,25 +570,55 @@ export const sound = {
     const scale = [523, 587, 659, 784, 880, 1047];
     tone(scale[i % scale.length] * (i % 12 < 6 ? 1 : 1.5), t, 0.35, { type: 'triangle', gain: 0.06 });
   },
-  // 생일 축하 노래 반주(오르골 소리). delay초 뒤에 시작하고, 그동안 배경 음악은 작게 줄인다.
-  birthdaySong(delay = 0) {
+  // 생일 축하 노래 반주: 피아노 같은 멜로디 + 왈츠(쿵-짝-짝) 반주 + 은은한 울림, 끝에 화음으로 마무리.
+  // delay초 뒤에 시작하고, 그동안 배경 음악은 작게 줄인다.
+  birthdaySong(delay = 0, offset = 0) {
     if (!on) return;
-    const t0 = ctx.currentTime + Math.max(0, delay) + LEAD_IN * BEAT;
+    const t0 = ctx.currentTime + Math.max(0, delay) + LEAD_IN * BEAT - Math.max(0, offset); // offset: 이미 지난 박(초)
     const bgm = wanted && players[wanted];
     if (bgm) {
-      fade(bgm, TRACKS[wanted].volume * 0.15, 600);
-      setTimeout(() => { if (on && players[wanted] === bgm) fade(bgm, TRACKS[wanted].volume, 1500); }, (delay + SONG_SECONDS + 0.5) * 1000);
+      fade(bgm, TRACKS[wanted].volume * 0.12, 600);
+      setTimeout(() => { if (on && players[wanted] === bgm) fade(bgm, TRACKS[wanted].volume, 1500); }, (delay + SONG_SECONDS + 2) * 1000);
     }
+    // 노래 전용 소리 길: 그대로 + 방 울림(잔향)
+    const bus = ctx.createGain();
+    bus.gain.value = 1.1;
+    bus.connect(master);
+    const verb = ctx.createConvolver();
+    verb.buffer = roomImpulse();
+    const wet = ctx.createGain();
+    wet.gain.value = 0.28;
+    bus.connect(verb).connect(wet).connect(master);
+    setTimeout(() => { try { bus.disconnect(); wet.disconnect(); } catch { /* 이미 끊김 */ } }, (delay + SONG_SECONDS + 6) * 1000);
     // 준비 박: 똑, 똑
-    for (let i = 0; i < LEAD_IN; i++) tone(1760, t0 - (LEAD_IN - i) * BEAT, 0.08, { type: 'square', gain: 0.03 });
+    for (let i = 0; i < LEAD_IN; i++) tone(1760, t0 - (LEAD_IN - i) * BEAT, 0.08, { type: 'square', gain: 0.03, dest: bus });
+    // 멜로디(피아노 느낌: 삼각파 + 한 옥타브 위 사인 + 짧게 반짝이는 종)
     let b = 0;
     for (const [f, len] of MELODY) {
       const t = t0 + b * BEAT;
-      tone(f, t, Math.max(0.5, len * BEAT * 1.6), { type: 'triangle', gain: 0.13 });
-      tone(f * 2, t, 0.5, { type: 'sine', gain: 0.035 });
+      const d = Math.max(0.45, len * BEAT * 1.4);
+      tone(f, t, d, { type: 'triangle', gain: 0.17, dest: bus });
+      tone(f * 2, t, d * 0.7, { type: 'sine', gain: 0.05, dest: bus });
+      if (Math.abs(b - Math.round(b)) < 0.01 && Math.round(b) % 3 === 1) tone(f * 4, t, 0.35, { type: 'sine', gain: 0.018, dest: bus });
       b += len;
     }
-    for (const [at, f] of BASS) tone(f, t0 + at * BEAT, BEAT * 2.6, { type: 'sine', gain: 0.12 });
+    // 왈츠 반주: 1박 베이스(쿵), 2·3박 화음(짝 짝)
+    for (const c of CHORDS) {
+      for (let k = 0; k < c.len; k++) {
+        const t = t0 + (c.at + k) * BEAT;
+        if (k === 0) {
+          tone(c.bass, t, BEAT * 1.6, { type: 'sine', gain: 0.17, dest: bus });
+          tone(c.bass * 2, t, BEAT * 0.9, { type: 'triangle', gain: 0.04, dest: bus });
+        } else {
+          for (const f of c.tones) tone(f, t, BEAT * 0.7, { type: 'sine', gain: 0.045, dest: bus });
+        }
+      }
+    }
+    // 마무리: 도-미-솔-도 펼침화음과 길게 남는 화음
+    const tEnd = t0 + SONG_BEATS * BEAT;
+    [261.63, 329.63, 392, 523.25].forEach((f, i) => tone(f, tEnd + i * 0.09, 2.6, { type: 'triangle', gain: 0.07, dest: bus }));
+    tone(130.81, tEnd, 2.8, { type: 'sine', gain: 0.15, dest: bus });
+    [1046.5, 1318.5].forEach((f, i) => tone(f, tEnd + 0.4 + i * 0.12, 1.5, { type: 'sine', gain: 0.025, dest: bus }));
   },
   swell() {
     if (!on) return;

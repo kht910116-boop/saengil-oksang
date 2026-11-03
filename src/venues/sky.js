@@ -268,8 +268,9 @@ export function buildSky(scene) {
       pos: dk.home.clone().add(new THREE.Vector3(0, 0, 2.3)),
       labelY: 2.4,
       run({ person }) {
-        if (dk.ride || !person) return {};
-        dk.ride = { person, t: 0, burn: 0 };
+        if (!person) return {};
+        if (dk.ride) return { status: '지금은 다른 친구가 타고 있어요. 옆 열기구를 타 보세요' };
+        dk.ride = { person, t: 0, burn: 0, start: performance.now() };
         person.busyUntil = performance.now() + 17000;
         person.target = null;
         sound.burner();
@@ -337,7 +338,7 @@ export function buildSky(scene) {
       for (const dk of docks) {
         const r = dk.ride;
         if (!r) { dk.hb.position.set(dk.home.x, dk.home.y + Math.sin(t * 0.9 + dk.home.x) * 0.08, dk.home.z); continue; }
-        r.t += dt;
+        r.t = (performance.now() - r.start) / 1000; // 실제 시간 기준(느린 휴대폰에서도 17초 안에 끝나게)
         const p = r.person;
         const aborted = !(p.busyUntil > now); // 점등식 등으로 중간에 끝난 경우
         const k = r.t;
