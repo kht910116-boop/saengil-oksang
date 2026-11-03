@@ -28,11 +28,12 @@
 | `TRUST_PROXY` | `1` |
 
 `PORT`, `DB_PATH`, `NODE_ENV`는 넣지 않아도 됩니다(Railway와 Dockerfile이 정함).
+점등 알림(웹 푸시) 열쇠도 넣지 않아도 됩니다. 처음 실행할 때 볼륨(`/app/data/vapid.json`)에 만들어 계속 씁니다. 볼륨을 지우면 이미 신청된 알림은 다시 신청해야 합니다.
 
 ## 4. 지역과 주소
 1. **Settings → Region** 에서 한국과 가까운 **싱가포르(Southeast Asia)** 를 고릅니다. 다른 지역을 고르면 `public/privacy.html`의 서버 위치도 같이 바꿔야 합니다.
 2. **Settings → Networking → Generate Domain** 을 누르면 `○○○.up.railway.app` 주소가 생깁니다. 이게 사이트 주소입니다.
-3. 나중에 `saengiloksang.com` 같은 도메인을 사면 같은 곳의 **Custom Domain** 에 연결합니다.
+3. 나중에 도메인을 사면 같은 곳의 **Custom Domain** 에 연결합니다. 점등 알림은 HTTPS 주소에서만 동작합니다(Railway 주소는 처음부터 HTTPS).
 
 ## 5. 확인
 - `https://(주소)/healthz` 에 `{"ok":true,...}` 가 나오면 서버가 살아 있는 것입니다.
@@ -40,7 +41,7 @@
 - 운영자 화면: `https://(주소)/admin?key=(ADMIN_KEY 값)`
 
 ## 6. 비용을 줄이려면 (나중에)
-- 접속이 많아지면 Cloudflare(무료)를 도메인 앞에 두고 `/assets/`·`/audio/`·`/og.png` 를 캐시하게 하세요. 전송량 대부분이 여기서 줄어듭니다.
+- 접속이 많아지면 Cloudflare(무료)를 도메인 앞에 두고 `/assets/`·`/audio/`·`/og.png`·`/og/` 를 캐시하게 하세요. 전송량 대부분이 여기서 줄어듭니다.
 - Cloudflare를 앞에 두면 WebSocket 프록시를 켜 두어야 합니다(기본으로 켜져 있음).
 
 ## 업데이트
