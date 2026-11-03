@@ -141,7 +141,7 @@ function count(type) {
   try { q.metric.run(kstDay(), type); } catch { /* 측정 실패는 서비스에 영향 없음 */ }
 }
 const CLIENT_EVENTS = new Set(['landing_visit', 'venue_preview', 'demo_visit', 'friend_visit', 'owner_door', 'owner_enter', 'ignite_seen', 'letters_open',
-  'share_click', 'cta_click', 'photo_save', 'video_save', 'calendar_click', 'react', 'inapp_open_external', 'webgl_fail', 'group_photo_save', 'memory_save', 'lite_on', 'lite_off', 'spot_use', 'venue_preview', 'emote']);
+  'share_click', 'cta_click', 'photo_save', 'video_save', 'calendar_click', 'react', 'inapp_open_external', 'webgl_fail', 'group_photo_save', 'memory_save', 'lite_on', 'lite_off', 'spot_use', 'venue_preview', 'emote', 'group_motion']);
 
 function clean(s, max) {
   return String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max);
@@ -715,6 +715,14 @@ server.on('upgrade', (req, socket, head) => {
         if (now - (peer.lastEmote || 0) < 800) return;
         peer.lastEmote = now;
         broadcast(roof.id, { t: 'emote', id: peer.id, kind: msg.kind }, peer.id);
+      } else if (msg.t === 'gmo' && peer.joined && !peer.spectator && GROUP_MOTIONS.has(msg.kind) && Array.isArray(msg.ids)) {
+        // 같이 하는 동작: 같은 방의 실제 참가자만, 사람당 3초에 한 번. 시작 시각은 서버가 정해 모두 맞춘다.
+        const now = Date.now();
+        if (now - (peer.lastGmo || 0) < 3000) return;
+        peer.lastGmo = now;
+        const ids = msg.ids.filter((id) => typeof id === 'string' && room.has(id) && id !== peer.id).slice(0, 7);
+        if (!ids.length) return;
+        broadcast(roof.id, { t: 'gmo', kind: msg.kind, by: peer.id, ids, cx: clampNum(msg.cx, -40, 40), cz: clampNum(msg.cz, -40, 40), ang: clampNum(msg.ang, -7, 7), at: now + 300 }, peer.id);
       } else if (msg.t === 'fx' && peer.joined && !peer.spectator && FX_IDS.has(msg.id)) {
         // 장소 놀거리(뱃고동·눈사람·열기구 등): 모두의 화면에서 같이 일어나게 중계. 한 사람은 1.5초에 한 번, 같은 놀거리는 방마다 1초에 한 번
         const now = Date.now();
@@ -746,6 +754,7 @@ function view(p) {
   return { id: p.id, name: p.name, color: p.color, hat: p.hat, outfit: p.outfit, acc: p.acc || 'none', x: p.x, z: p.z, owner: p.isOwner };
 }
 const REACTIONS = new Set(['clap', 'heart', 'party']);
+const GROUP_MOTIONS = new Set(['highfive', 'hug', 'ring', 'conga', 'selfie']);
 const EMOTES = new Set(['hop', 'sit', 'wave', 'dance', 'bow', 'flip', 'spin', 'cheer', 'wiggle', 'surprise', 'cry', 'stretch', 'lie', 'sleep', 'heart', 'eat', 'cheers']);
 const FX_IDS = new Set(['horn', 'wheel', 'aurora', 'snowman', 'fire', 'ride1', 'ride2', 'ride3', 'bell', 'tpA', 'tpB', 'disco']);
 const fxAt = new Map(); // 놀거리 도배 방지(파티장:놀거리 → 마지막 시각)

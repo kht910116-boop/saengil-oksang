@@ -310,6 +310,20 @@ export function buildSpace(scene) {
   // 파티 차림: 왼쪽 뷔페, 선물, 현수막, 입구 풍선 아치, 트러스 기둥 사이 깃발 줄
   const ring5 = postsXZ.map(([x, z]) => new THREE.Vector3(x, 3.8, z));
   const party = partyDressing(group, {
+    theme: 'space',
+    seating: [{ x: 9, z: -3.5, ry: -Math.PI / 2 }, { x: 9, z: 0.5, ry: -Math.PI / 2 }],
+    extras(deco, k) {
+      const r1 = k.holoRing(0x6fe3ff, 4.2);
+      r1.position.y = 6.6;
+      const r2 = k.holoRing(0xb48cff, 2.8);
+      r2.position.y = 7.4;
+      deco.add(r1, r2);
+      for (const s2 of [-1, 1]) { const sb = k.saturnBalloon(s2 > 0 ? 0xff7ab8 : 0xffb35a); sb.position.set(s2 * 3.6, 2.8, ZB - 2.2); deco.add(sb); }
+      const rk = k.rocket();
+      rk.position.set(-6, 0, -19.5);
+      deco.add(rk);
+      k.obstacles.push({ x: -6, z: -19.5, r: 0.6 });
+    },
     buffet: { x: -8, z: 2.5, ry: Math.PI / 2 },
     arch: { x: 0, z: ZB - 1.4 },
     banner: { x: 0, y: 3.0, z: -5.6 },
@@ -318,7 +332,7 @@ export function buildSpace(scene) {
   obstacles.push(...party.obstacles);
   hotspots.push(...party.hotspots);
 
-  const cake = cakeTable(group, { legColor: 0xc9d0de, topColor: 0xeaf0ff });
+  const cake = cakeTable(group, { legColor: 0xc9d0de, topColor: 0xeaf0ff, theme: 'space' });
   obstacles.push(cake.obstacle);
   const balloons = decoBalloons(group, undefined, [0x7ad7ff, 0xb48cff, 0xffffff, 0xff9ecb, 0x7ad7ff]);
 
@@ -345,6 +359,8 @@ export function buildSpace(scene) {
     ...lights,
     bounds: { minX: -PX + 0.6, maxX: PX - 0.6, minZ: ZF + 0.6, maxZ: ZB - 0.6 },
     hotspots,
+    seats: party.seats,
+    props: party.props,
     roam: 16,
     zones: [{ kind: 'float', test: (p) => (p.x - ZG.x) ** 2 + (p.z - ZG.z) ** 2 < zgR * zgR }],
     entrance: new THREE.Vector3(0, 0, ZB - 1.2),

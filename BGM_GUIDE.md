@@ -53,3 +53,13 @@ Google Flow Music으로 만든 6곡 중 3곡을 골라 손질해 넣었습니다
 > A 35-second cinematic birthday reveal. Starts almost silent with a single music box note for the first 4 seconds, then at 5 seconds blooms into a warm swell of strings, bells and soft choir pads as lights turn on one by one, rising to a joyful, tender peak around 12 seconds, then settles into a gentle glowing ending. Magical, heartfelt, celebratory. No lyrics.
 
 (한국어 설명: 처음 4초는 거의 조용하다가, 5초쯤 전구가 켜지는 순간 현악과 종소리가 확 피어나고, 12초쯤 절정, 그다음 잔잔하게 끝남. 화면 연출은 1.2초에 전구가 켜지기 시작해 4.8초에 하늘에 이름이 떠오르도록 맞춰져 있습니다.)
+
+
+## 추가된 곡(구글 플로우)
+| 파일 | 원곡 | 쓰는 곳 | 손질 |
+|---|---|---|---|
+| bgm-fanfare.mp3 | Royal Entrance (2번째) | 주인공 입장 행진(한 번) | 0.9초부터 12.5초, 끝 1.8초 페이드, -15 LUFS |
+| bgm-party.mp3 | Birthday Chimes | 점등 뒤 파티(반복) | 50초부터 27마디(80초), 한 마디 겹쳐 이음새 없이, -16 LUFS |
+| bgm-landing.mp3 | Make a Wish | 첫 화면(반복) | 40초부터 27마디(80초), 같은 방식 |
+
+네 곡 모두 Whisper로 목소리가 없음을 확인했습니다.

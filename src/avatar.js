@@ -278,10 +278,26 @@ function flowerPin() {
   g.rotation.y = -0.6;
   return g;
 }
+// 손 소품 모양(간식: 컵케이크·새우·쿠키·샌드위치·우주식·꼬치 / 음료: 컵·주스잔·머그·찻잔·시험관·캔)
+const PROP_BUILDERS = {
+  cupcake() { const g = new THREE.Group(); g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.045, 0.07, 10), soft(0xf6e2c8, 0.1))); const t = new THREE.Mesh(new THREE.SphereGeometry(0.065, 10, 8), soft(0xf29bb3, 0.2)); t.position.y = 0.06; t.scale.y = 0.8; g.add(t); return g; },
+  shrimp() { const g = new THREE.Group(); const sh = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.025, 6, 10, Math.PI * 1.3), soft(0xff8a5c, 0.2)); sh.rotation.x = Math.PI / 2; g.add(sh, new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.18, 4), soft(0xd8c3a0, 0.1))); return g; },
+  cookie() { const g = new THREE.Group(); const c = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.025, 5), soft(0xc98a4a, 0.1)); c.rotation.x = Math.PI / 2; const ic = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.028, 5), soft(0xffffff, 0.2)); ic.rotation.x = Math.PI / 2; g.add(c, ic); return g; },
+  sandwich() { const g = new THREE.Group(); [[0xf2d9a8, 0], [0x8fd36a, 0.02], [0xff8a8a, 0.035], [0xf2d9a8, 0.055]].forEach(([c, y]) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.02, 3), soft(c, 0.12)); m.position.y = y; g.add(m); }); return g; },
+  spacefood() { const g = new THREE.Group(); g.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.14, 0.02), soft(0xd8dde8, 0.15))); const l = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.04, 0.022), soft(0x4fd8ff, 0.6)); g.add(l); return g; },
+  skewer() { const g = new THREE.Group(); g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.3, 4), soft(0xd8c3a0, 0.1))); [0x8a3a1c, 0x6cc070, 0xe5484d, 0x8a3a1c].forEach((c, k) => { const m = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.05), soft(c, 0.12)); m.position.y = 0.04 + k * 0.05; g.add(m); }); return g; },
+  cup() { const g = new THREE.Group(); g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.045, 0.13, 12), soft(0xffffff, 0.15))); const j = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.08, 12), soft(0xff6b8a, 0.35)); j.position.y = 0.03; g.add(j); return g; },
+  coupe() { const g = new THREE.Group(); const b = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.015, 0.06, 12), soft(0xffd66b, 0.4)); b.position.y = 0.09; g.add(b, new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.12, 5), soft(0xffffff, 0.2))); return g; },
+  mug() { const g = new THREE.Group(); g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.055, 0.11, 12), soft(0xd94a5a, 0.15))); const h = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.01, 5, 10), soft(0xd94a5a, 0.15)); h.position.x = 0.065; g.add(h); const m = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.03), soft(0xffffff, 0.3)); m.position.y = 0.065; g.add(m); return g; },
+  teacup() { const g = new THREE.Group(); g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.04, 0.06, 12), soft(0xffffff, 0.2))); const sc = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.008, 14), soft(0xffffff, 0.2)); sc.position.y = -0.035; const h = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.008, 5, 10), soft(0xf29bb3, 0.2)); h.position.x = 0.06; g.add(sc, h); return g; },
+  tube() { const g = new THREE.Group(); g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.2, 10), soft(0xffffff, 0.2))); const l = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.12, 10), new THREE.MeshBasicMaterial({ color: 0x4fd8ff })); l.position.y = -0.03; g.add(l); return g; },
+  can() { const g = new THREE.Group(); g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.13, 12), soft(0xe5484d, 0.2))); const t = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.045, 0.01, 12), soft(0xd8dde8, 0.2)); t.position.y = 0.07; g.add(t); return g; },
+};
+
 export const ACCESSORY_BUILDERS = { ribbon, cat: catEars, bunny: bunnyEars, glasses, flower: flowerPin };
 const HAT_OFF = new Set(['ribbon', 'cat', 'bunny']); // 머리 위 소품과 고깔모자는 같이 쓰지 않는다
 
-export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46b, crown: wearsCrown = false, outfit = null, accessory = null } = {}) {
+export function createAvatar({ props: propTheme = null, color = 0xf29bb3, hat = false, hatColor = 0xffc46b, crown: wearsCrown = false, outfit = null, accessory = null } = {}) {
   const root = new THREE.Group();
   const turn = new THREE.Group(); // 바라보는 방향
   const jelly = new THREE.Group(); // 출렁임(찌그러짐)
@@ -353,29 +369,23 @@ export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46
   armL.rotation.z = -0.35;
   armR.rotation.z = 0.35;
   jelly.add(armL, armR);
-  // 손에 드는 소품(간식·컵): 몸짓을 할 때만 보인다
-  const props = {
-    eat: (() => {
-      const g = new THREE.Group();
-      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.045, 0.07, 10), soft(0xf6e2c8, 0.1));
-      const top = new THREE.Mesh(new THREE.SphereGeometry(0.065, 10, 8), soft(0xf29bb3, 0.2));
-      top.position.y = 0.06;
-      top.scale.y = 0.8;
-      const cherry = new THREE.Mesh(new THREE.SphereGeometry(0.02, 6, 5), soft(0xe5484d, 0.2));
-      cherry.position.y = 0.11;
-      g.add(base, top, cherry);
-      return g;
-    })(),
-    cheers: (() => {
-      const g = new THREE.Group();
-      const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.045, 0.13, 12), new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, roughness: 0.1 }));
-      const juice = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.04, 0.08, 12), soft(0xff6b8a, 0.35));
-      juice.position.y = -0.02;
-      g.add(cup, juice);
-      return g;
-    })(),
+  // 손에 드는 소품(간식·음료): 장소마다 다르고, 몸짓을 할 때만 보인다
+  let propKinds = { eat: 'cupcake', drink: 'cup', ...(propTheme || {}) };
+  const propCache = {};
+  const props = { eat: null, cheers: null };
+  const holdProp = (slot, kind) => {
+    const key = `${slot}:${kind}`;
+    if (!propCache[key]) {
+      const g = (PROP_BUILDERS[kind] || PROP_BUILDERS[slot === 'eat' ? 'cupcake' : 'cup'])();
+      mergeStatic(g);
+      g.position.set(0, -0.27, 0.02);
+      g.visible = false;
+      armR.add(g);
+      propCache[key] = g;
+    }
+    return propCache[key];
   };
-  for (const pr of Object.values(props)) { pr.visible = false; pr.position.set(0, -0.27, 0.02); armR.add(pr); }
+  const hideProps = () => { for (const g of Object.values(propCache)) g.visible = false; };
   const wear = OUTFIT_BUILDERS[outfit]?.(color) || null;
   if (wear) {
     jelly.add(mergeStatic(wear.group));
@@ -431,7 +441,7 @@ export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46
   let lookOff = 0;
   let gestureKind = null;
   let gestureT = 0;
-  const GESTURE_LEN = { clap: 1.0, heart: 1.4, cheer: 1.8, wave: 1.6, spin: 0.9, bow: 1.3, flip: 1.1, surprise: 0.9, cry: 2.2, stretch: 1.8, wiggle: 2.0, eat: 2.0, cheers: 1.8 };
+  const GESTURE_LEN = { clap: 1.0, heart: 1.4, cheer: 1.8, wave: 1.6, spin: 0.9, bow: 1.3, flip: 1.1, surprise: 0.9, cry: 2.2, stretch: 1.8, wiggle: 2.0, eat: 2.0, cheers: 1.8, highfive: 1.2, hug: 2.0, ringhands: 6.2, conga: 7.2 };
   let poseK = 0; // 자세(앉기·눕기 등)로 바뀌는 정도 0~1
   let lastPose = null; // 풀리는 동안에도 같은 자세로 돌아오게
   let hop = 0;
@@ -455,7 +465,8 @@ export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46
     sway: 0, // 노래할 때 좌우로 흔들기 0~1
     swayPhase: 0, // 흔들기 박자(모두 같은 값을 주면 다 같이 흔든다)
     // 몸짓: clap(박수) · heart(머리 위 하트) · cheer(만세) · wave(손 흔들기) · spin(한 바퀴)
-    gesture(kind) { props.eat.visible = false; props.cheers.visible = false; gestureKind = kind; gestureT = 0; },
+    gesture(kind) { hideProps(); gestureKind = kind; gestureT = 0; },
+    setProps(t) { propKinds = { eat: 'cupcake', drink: 'cup', ...(t || {}) }; },
     // 계속 유지하는 자세: sit(앉기) · lie(벌러덩) · sleep(졸기) · dance(춤). 걸으면 풀린다.
     pose: null,
     root,
@@ -543,16 +554,31 @@ export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46
           jelly.rotation.y = THREE.MathUtils.smootherstep(k, 0, 1) * Math.PI * 2;
         }
         else if (gestureKind === 'eat') { // 간식을 입으로 냠냠(볼이 오물오물)
-          props.eat.visible = true;
+          holdProp('eat', propKinds.eat).visible = true;
           armR.rotation.x = -1.7 * env + Math.sin(gestureT * 9) * 0.15 * env;
           armR.rotation.z = -0.55 * env;
           jelly.scale.x *= 1 + Math.abs(Math.sin(gestureT * 9)) * 0.04 * env;
         } else if (gestureKind === 'cheers') { // 컵을 높이 들고 건배
-          props.cheers.visible = true;
+          holdProp('drink', propKinds.drink).visible = true;
           const up = Math.min(1, gestureT * 3);
           armR.rotation.z = (0.35 + 2.0 * up) * env;
           armR.rotation.x = -0.4 * env;
           jelly.rotation.z -= 0.08 * env;
+        } else if (gestureKind === 'highfive') { // 손바닥을 높이 들어 짝!
+          armR.rotation.z = (0.35 + 2.3 * Math.min(1, gestureT * 4)) * env;
+          armR.rotation.x = -0.7 * env;
+        } else if (gestureKind === 'hug') { // 두 팔로 꼭 안기
+          armL.rotation.x = armR.rotation.x = -1.35 * env;
+          armL.rotation.z = 0.75 * env;
+          armR.rotation.z = -0.75 * env;
+          jelly.scale.x *= 1 - 0.05 * env;
+        } else if (gestureKind === 'ringhands') { // 양옆 사람과 손잡기
+          armL.rotation.z = -1.35 * env;
+          armR.rotation.z = 1.35 * env;
+        } else if (gestureKind === 'conga') { // 앞사람 어깨에 손 얹기
+          armL.rotation.x = armR.rotation.x = -1.45 * env;
+          armL.rotation.z = 0.25 * env;
+          armR.rotation.z = -0.25 * env;
         } else if (gestureKind === 'bow') { // 꾸벅 인사
           jelly.rotation.x += Math.sin(Math.min(1, k) * Math.PI) * 0.7;
           armL.rotation.x = armR.rotation.x = 0.3 * env;
@@ -584,7 +610,7 @@ export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46
           armL.rotation.z = -1.2 * env;
           armR.rotation.z = 1.2 * env;
         }
-        if (gestureT >= len) { gestureKind = null; jelly.rotation.y = 0; props.eat.visible = false; props.cheers.visible = false; }
+        if (gestureT >= len) { gestureKind = null; jelly.rotation.y = 0; hideProps(); }
       }
       // 자세: 걸으면 풀린다
       if (moving && api.pose) api.pose = null;

@@ -246,7 +246,7 @@ export function buildCruise(scene) {
   group.add(scope);
   obstacles.push({ x: 0, z: -35, r: 0.5 });
 
-  const cake = cakeTable(group, { legColor: 0x1d2c66 });
+  const cake = cakeTable(group, { legColor: 0x1d2c66, theme: 'cruise' });
   obstacles.push(cake.obstacle);
   const balloons = decoBalloons(group);
 
@@ -356,6 +356,11 @@ export function buildCruise(scene) {
   // 파티 차림: 왼쪽 뷔페, 케이크 옆 선물, 케이크 뒤 현수막, 승선구 풍선 아치, 둘레 기둥 사이 깃발 줄
   const lo = (p) => new THREE.Vector3(p.x, 3.5, p.z);
   const party = partyDressing(group, {
+    theme: 'cruise',
+    seating: [{ x: 9.5, z: 4.5, ry: -Math.PI / 2 }, { x: 9.5, z: 1, ry: -Math.PI / 2 }],
+    extras(deco, k) {
+      for (const z of [-5.2, 1.4]) { const b = k.barrel(); b.position.set(-9.6, 0, z); deco.add(b); k.obstacles.push({ x: -9.6, z, r: 0.45 }); }
+    },
     buffet: { x: -8, z: -2, ry: Math.PI / 2 },
     arch: { x: 0, z: Z1 - 1.4 },
     banner: { x: 0, y: 3.0, z: -5.6 },
@@ -373,6 +378,8 @@ export function buildCruise(scene) {
     ...cake,
     ...lights,
     hotspots,
+    seats: party.seats,
+    props: party.props,
     roam: 18,
     bounds: { minX: -X, maxX: X, minZ: BOW + 2, maxZ: Z1 },
     // 뱃머리는 끝으로 갈수록 좁아진다

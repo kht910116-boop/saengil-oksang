@@ -56,7 +56,20 @@ export function moon(group, pos, r = 5, color = 0xfff1d0) {
 // 케이크 테이블: 식탁보를 두른 둥근 테이블 위 3단 케이크(크림이 흘러내리고 딸기·마카롱·장미 크림), 접시와 컵.
 // 움직이지 않는 부분은 한 덩어리로 합치고, 불꽃(흔들림·끄기)만 따로 둔다.
 export const CAKE = { tableR: 1.6, topY: 1.92, flameY: 2.14 }; // 다른 코드가 위치를 맞출 때 쓰는 치수
-export function cakeTable(group, { legColor = 0x3a3150, topColor = PAL.paper, at = new THREE.Vector3() } = {}) {
+// 메시를 만들면서 바로 위치 지정
+const placeAt = (m, x, y, z) => { m.position.set(x, y, z); return m; };
+
+// 장소별 케이크 디자인: 단 색 · 크림 색 · 흘러내리는 크림 색 · 단 위 장식 · 토퍼 · 테이블 천 색
+const CAKE_THEMES = {
+  rooftop: { tiers: [0xffffff, 0xfff1f5, 0xffffff], cream: 0xffffff, drips: [0xff5c8a, 0xffd34d, 0x4fd8ff, 0x9bff6b, 0xb48cff], deco: 'sprinkle', topper: 'stars', cloth: 0xffffff, skirt: 0x2a2238, slice: 0xff5c8a },
+  cruise: { tiers: [0x1d2c66, 0xffffff, 0x1d2c66], cream: 0xffffff, drips: [0xffffff], deco: 'pearl', rope: true, topper: 'anchor', cloth: 0xffffff, skirt: 0x1d2c66, slice: 0x1d2c66 },
+  aurora: { tiers: [0xffffff, 0xcfeeff, 0xffffff], cream: 0xf6fbff, drips: [0xdff2ff], deco: 'silver', topper: 'snowflake', cloth: 0xf2f6ff, skirt: 0x9fd8ff, slice: 0xcfeeff },
+  sky: { tiers: [0xd8c8ff, 0xffd6c0, 0xc8f0e0], cream: 0xfffaf2, drips: [0xfffaf2], deco: 'flower', topper: 'butterfly', cloth: 0xfff8ec, skirt: 0xffd6e0, slice: 0xffd6c0 },
+  space: { tiers: [0x2a2060, 0x14182a, 0x3a2a7a], cream: 0xd8c8ff, drips: [0xb48cff, 0x6fe3ff], deco: 'galaxy', topper: 'saturn', cloth: 0x2a3042, skirt: 0x14182a, slice: 0x3a2a7a },
+};
+export function cakeTable(group, { legColor = 0x3a3150, topColor = PAL.paper, at = new THREE.Vector3(), theme = 'rooftop' } = {}) {
+  const TH = CAKE_THEMES[theme] || CAKE_THEMES.rooftop;
+  topColor = TH.cloth;
   const table = new THREE.Group();
   const deco = new THREE.Group();
   const M = (color, emissive = 0.1, rough = 0.6, metal = 0) => new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: emissive, roughness: rough, metalness: metal });
@@ -76,7 +89,7 @@ export function cakeTable(group, { legColor = 0x3a3150, topColor = PAL.paper, at
     sp.setZ(i, z * k);
   }
   skirtGeo.computeVertexNormals();
-  const skirtMat = M(0xf7d6df, 0.1, 0.9);
+  const skirtMat = M(TH.skirt, 0.1, 0.9);
   skirtMat.side = THREE.DoubleSide;
   const skirt = new THREE.Mesh(skirtGeo, skirtMat);
   skirt.position.y = 0.39;
@@ -85,9 +98,10 @@ export function cakeTable(group, { legColor = 0x3a3150, topColor = PAL.paper, at
   lace.position.y = 0.76;
   deco.add(top, skirt, lace);
   // 3단 케이크
-  const tiers = [[0.85, 0.42, PAL.pink], [0.64, 0.36, PAL.paper], [0.44, 0.3, PAL.pink]];
+  const tiers = [[0.85, 0.42, TH.tiers[0]], [0.64, 0.36, TH.tiers[1]], [0.44, 0.3, TH.tiers[2]]];
   let y = 0.84;
-  const cream = M(0xfff4e6, 0.06, 0.5);
+  const cream = M(TH.cream, 0.06, 0.5);
+  const dripMats = TH.drips.map((c) => M(c, theme === 'space' ? 0.6 : 0.08, 0.5));
   const berry = M(0xe5484d, 0.15, 0.35);
   const macCols = [PAL.mint, PAL.lavender, 0xffd97a];
   tiers.forEach(([r, h, c], ti) => {
@@ -99,7 +113,7 @@ export function cakeTable(group, { legColor = 0x3a3150, topColor = PAL.paper, at
     for (let i = 0; i < drips; i++) {
       const a = (i / drips) * Math.PI * 2;
       const len = 0.06 + ((i * 37) % 7) * 0.018;
-      const d = new THREE.Mesh(new THREE.CapsuleGeometry(0.035, len, 3, 6), cream);
+      const d = new THREE.Mesh(new THREE.CapsuleGeometry(0.035, len, 3, 6), dripMats[i % dripMats.length]);
       d.position.set(Math.cos(a) * (r + 0.005), y + h - len / 2 - 0.02, Math.sin(a) * (r + 0.005));
       deco.add(d);
     }
@@ -114,43 +128,85 @@ export function cakeTable(group, { legColor = 0x3a3150, topColor = PAL.paper, at
       b.position.set(Math.cos(a) * r, y + 0.03, Math.sin(a) * r);
       deco.add(b);
     }
-    // 단 위 장식: 1·2단은 딸기와 마카롱을 번갈아, 3단은 딸기 고리
+    // 밧줄 띠(크루즈)
+    if (TH.rope) {
+      const rope = new THREE.Mesh(new THREE.TorusGeometry(r + 0.02, 0.025, 6, 40), M(0xd6b24a, 0.25, 0.4, 0.5));
+      rope.rotation.x = Math.PI / 2;
+      rope.position.y = y + h * 0.45;
+      deco.add(rope);
+    }
+    // 단 위 장식(테마마다 다르게)
     const n = ti === 2 ? 8 : 10;
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + ti * 0.3;
       const rr = ti === 2 ? r * 0.72 : (r + tiers[ti + 1][0]) / 2;
       const px = Math.cos(a) * rr;
       const pz = Math.sin(a) * rr;
-      if (ti < 2 && i % 2) {
-        const mac = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.06, 12), M(macCols[(i + ti) % 3], 0.15));
-        mac.rotation.z = Math.PI / 2;
-        mac.rotation.y = -a;
-        mac.position.set(px, y + h + 0.06, pz);
-        deco.add(mac);
-      } else {
-        const s = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.11, 8), berry);
-        s.rotation.x = Math.PI;
-        s.position.set(px, y + h + 0.07, pz);
-        const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.03, 5), M(0x5aa060, 0.1));
-        leaf.position.set(px, y + h + 0.135, pz);
-        deco.add(s, leaf);
+      const yy = y + h + 0.06;
+      if (TH.deco === 'pearl' || TH.deco === 'silver') {
+        const pm = TH.deco === 'pearl' ? M(0xfff8ec, 0.25, 0.2, 0.3) : M(0xe8eef6, 0.2, 0.15, 0.9);
+        for (let k = 0; k < 3; k++) { const pe = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), pm); pe.position.set(px + Math.cos(a + k) * 0.04, yy - 0.02, pz + Math.sin(a + k) * 0.04); deco.add(pe); }
+        if (i % 2 && TH.deco === 'silver') { // 작은 눈송이
+          for (let k = 0; k < 3; k++) { const fl = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.015, 0.015), M(0xffffff, 0.5)); fl.position.set(px, yy + 0.05, pz); fl.rotation.set(0, -a, (k * Math.PI) / 3); deco.add(fl); }
+        } else if (i % 2) {
+          const st = new THREE.Mesh(new THREE.OctahedronGeometry(0.045, 0), M(0xd6b24a, 0.35, 0.3, 0.6));
+          st.position.set(px, yy + 0.04, pz);
+          deco.add(st);
+        }
+      } else if (TH.deco === 'flower') {
+        const pc = [0xf29bb3, 0xffffff, 0xffd97a][i % 3];
+        for (let k = 0; k < 5; k++) { const pt = new THREE.Mesh(new THREE.SphereGeometry(0.035, 6, 5), M(pc, 0.2)); const ak = (k / 5) * Math.PI * 2; pt.position.set(px + Math.cos(ak) * 0.04, yy, pz + Math.sin(ak) * 0.04); deco.add(pt); }
+        const ctr = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 5), M(0xffd34d, 0.3));
+        ctr.position.set(px, yy + 0.02, pz);
+        const lf = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.08, 4), M(0x6cc070, 0.1));
+        lf.position.set(px + Math.cos(a) * 0.07, yy - 0.01, pz + Math.sin(a) * 0.07);
+        lf.rotation.z = Math.PI / 2;
+        deco.add(ctr, lf);
+      } else if (TH.deco === 'galaxy') {
+        for (let k = 0; k < 4; k++) { const sd = new THREE.Mesh(new THREE.SphereGeometry(0.014, 5, 4), M(k % 2 ? 0xffffff : 0x6fe3ff, 1.2)); sd.position.set(px + (k - 1.5) * 0.04, yy - 0.03, pz + ((k * 7) % 3 - 1) * 0.04); deco.add(sd); }
+        if (i % 3 === 0) { const st = new THREE.Mesh(new THREE.OctahedronGeometry(0.05, 0), M(0xffd34f, 1.0)); st.position.set(px, yy + 0.03, pz); deco.add(st); }
+      } else { // sprinkle: 무지개 스프링클과 미니 도넛
+        for (let k = 0; k < 5; k++) { const sp2 = new THREE.Mesh(new THREE.CapsuleGeometry(0.008, 0.03, 2, 4), M([0xff5c8a, 0xffd34d, 0x4fd8ff, 0x9bff6b, 0xb48cff][k], 0.3)); sp2.position.set(px + (k - 2) * 0.03, yy - 0.03, pz + ((k * 3) % 5 - 2) * 0.02); sp2.rotation.set(k, k * 2, 0); deco.add(sp2); }
+        if (i % 2) { const dn = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.022, 6, 12), M([0xff5c8a, 0xffd34d, 0x4fd8ff][i % 3], 0.2)); dn.rotation.x = Math.PI / 2.5; dn.position.set(px, yy + 0.02, pz); deco.add(dn); }
       }
     }
     y += h;
   });
-  // 금빛 축하 토퍼
+  // 토퍼(테마마다 다르게)
   const gold = M(0xffd34d, 0.35, 0.3, 0.6);
-  for (const s of [-1, 1]) {
-    const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.35, 5), gold);
-    stick.position.set(s * 0.22, y + 0.17, -0.18);
-    deco.add(stick);
+  const topper = new THREE.Group();
+  if (TH.topper === 'anchor') {
+    topper.add(placeAt(new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.4, 8), gold), 0, 0.25, 0));
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.015, 6, 12), gold);
+    ring.position.y = 0.48;
+    const arc = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.02, 6, 16, Math.PI), gold);
+    arc.rotation.z = Math.PI;
+    arc.position.y = 0.17;
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.03, 0.03), gold);
+    bar.position.y = 0.38;
+    topper.add(ring, arc, bar);
+  } else if (TH.topper === 'snowflake') {
+    for (let k = 0; k < 3; k++) { const b2 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.035, 0.02), M(0xffffff, 0.6, 0.2, 0.5)); b2.position.y = 0.32; b2.rotation.z = (k * Math.PI) / 3; topper.add(b2); }
+    topper.add(placeAt(new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.15, 5), M(0xffffff, 0.3)), 0, 0.07, 0));
+  } else if (TH.topper === 'butterfly') {
+    for (const s2 of [-1, 1]) { const w = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), M(s2 > 0 ? 0xf29bb3 : 0xb9a6f2, 0.3)); w.scale.set(1, 0.8, 0.15); w.position.set(s2 * 0.11, 0.33, 0); w.rotation.z = s2 * 0.4; topper.add(w); }
+    topper.add(placeAt(new THREE.Mesh(new THREE.CapsuleGeometry(0.02, 0.12, 3, 6), M(0x3a3150, 0.1)), 0, 0.33, 0));
+    topper.add(placeAt(new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.25, 5), gold), 0, 0.13, 0));
+  } else if (TH.topper === 'saturn') {
+    topper.add(placeAt(new THREE.Mesh(new THREE.SphereGeometry(0.13, 16, 12), M(0xffb35a, 0.5, 0.4)), 0, 0.36, 0));
+    const rg = new THREE.Mesh(new THREE.TorusGeometry(0.21, 0.02, 6, 28), M(0x6fe3ff, 1.0));
+    rg.rotation.x = Math.PI / 2 + 0.4;
+    rg.position.y = 0.36;
+    topper.add(rg, placeAt(new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.25, 5), M(0xd8dde8, 0.2, 0.3, 0.8)), 0, 0.12, 0));
+  } else { // stars: 금빛 별과 막대 장식
+    for (const s2 of [-1, 1]) topper.add(placeAt(new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.35, 5), gold), s2 * 0.22, 0.17, 0));
+    const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.11, 0), gold);
+    star.position.y = 0.45;
+    star.scale.z = 0.4;
+    topper.add(star, placeAt(new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.1, 0.02), gold), 0, 0.32, 0));
   }
-  const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.11, 0), gold);
-  star.position.set(0, y + 0.45, -0.18);
-  star.scale.z = 0.4;
-  const bar = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.1, 0.02), gold);
-  bar.position.set(0, y + 0.32, -0.18);
-  deco.add(star, bar);
+  topper.position.set(0, y, -0.18);
+  deco.add(topper);
   // 접시에 놓인 케이크 조각·포크·컵(테이블 둘레)
   const plate = M(0xffffff, 0.1, 0.3);
   const cupMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, roughness: 0.1 });
@@ -161,7 +217,7 @@ export function cakeTable(group, { legColor = 0x3a3150, topColor = PAL.paper, at
     const pz = Math.sin(a) * 1.22;
     const pl = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.15, 0.02, 20), plate);
     pl.position.set(px, 0.85, pz);
-    const slice = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.12, 3, 1, false, 0, Math.PI / 3.2), M(PAL.pink, 0.12));
+    const slice = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.12, 3, 1, false, 0, Math.PI / 3.2), M(TH.slice, 0.12));
     slice.position.set(px, 0.92, pz);
     slice.rotation.y = -a;
     const sb = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.05, 6), berry);

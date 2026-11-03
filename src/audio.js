@@ -178,7 +178,9 @@ const TRACKS = {
   rooftop: { src: `${AUDIO_BASE}bgm-rooftop.mp3`, loop: true, volume: 0.42 },
   door: { src: `${AUDIO_BASE}bgm-door.mp3`, loop: true, volume: 0.38 },
   midnight: { src: `${AUDIO_BASE}bgm-midnight.mp3`, loop: false, volume: 0.6 },
-  landing: { src: `${AUDIO_BASE}bgm-rooftop.mp3`, loop: true, volume: 0.32 },
+  landing: { src: `${AUDIO_BASE}bgm-landing.mp3`, loop: true, volume: 0.32 }, // Make a Wish
+  party: { src: `${AUDIO_BASE}bgm-party.mp3`, loop: true, volume: 0.4 }, // 점등 뒤 파티(Birthday Chimes)
+  fanfare: { src: `${AUDIO_BASE}bgm-fanfare.mp3`, loop: false, volume: 0.55 }, // 주인공 입장(Royal Entrance)
 };
 const players = {};
 let wanted = null; // 지금 틀어야 하는 곡 이름
@@ -274,6 +276,7 @@ export const sound = {
     applyMusic();
     return on;
   },
+  get track() { return wanted; },
   // 상황별 곡 바꾸기. thenTrack을 주면 한 번만 트는 곡이 끝난 뒤 그 곡으로 돌아간다.
   music(name, thenTrack = null) {
     wanted = name;

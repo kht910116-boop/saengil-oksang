@@ -118,6 +118,8 @@ test('캐릭터 동작·장소 놀거리: 목록에 있는 것만 중계, 도배
   a.send(JSON.stringify({ t: 'emote', kind: 'dance' })); // 0.8초 안에 또 → 무시
   a.send(JSON.stringify({ t: 'emote', kind: 'hack' }));
   a.send(JSON.stringify({ t: 'fx', id: 'horn' }));
+  a.send(JSON.stringify({ t: 'gmo', kind: 'hug', ids: [b.msgs.find((m) => m.t === 'welcome').you], cx: 0, cz: 0, ang: 0 }));
+  a.send(JSON.stringify({ t: 'gmo', kind: 'evil', ids: ['x'] }));
   a.send(JSON.stringify({ t: 'fx', id: 'rm-rf' }));
   await new Promise((r) => setTimeout(r, 250));
   const em = b.msgs.filter((m) => m.t === 'emote');
@@ -125,6 +127,9 @@ test('캐릭터 동작·장소 놀거리: 목록에 있는 것만 중계, 도배
   const fx = b.msgs.filter((m) => m.t === 'fx');
   assert.deepEqual(fx.map((m) => m.id), ['horn']);
   assert.ok(fx[0].by, '누가 했는지(아바타 id) 함께 보냄');
+  const gm = b.msgs.filter((m) => m.t === 'gmo');
+  assert.equal(gm.length, 1, '같이 하는 동작은 목록에 있는 것만');
+  assert.ok(gm[0].at > Date.now() - 1000 && gm[0].ids.length === 1, '서버가 시작 시각을 정해 참가자에게 보냄');
   a.close();
   b.close();
 });

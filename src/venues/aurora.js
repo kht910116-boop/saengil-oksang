@@ -176,7 +176,7 @@ export function buildAurora(scene) {
   }
   obstacles.push({ x: tree.position.x, z: tree.position.z, r: 1.8 });
   const sofaMat = new THREE.MeshStandardMaterial({ color: 0xe8dcc6, roughness: 0.9 });
-  for (const [x, z, ry] of [[-15.5, 3, 1.4], [-15.5, 9.5, 1.8]]) {
+  for (const [x, z, ry] of []) { // 소파는 파티 차림의 '앉는 자리'로 옮겼다
     const s = new THREE.Group();
     const seat = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.5, 1), sofaMat);
     seat.position.y = 0.35;
@@ -201,7 +201,7 @@ export function buildAurora(scene) {
   group.add(fire);
   obstacles.push({ x: fire.position.x, z: fire.position.z, r: 1.3 });
 
-  const cake = cakeTable(group, { legColor: 0x4a3226 });
+  const cake = cakeTable(group, { legColor: 0x4a3226, theme: 'aurora' });
   obstacles.push(cake.obstacle);
   const balloons = decoBalloons(group, undefined, [0x9fd8ff, PAL.mint, 0xffffff, PAL.lavender, 0x9fd8ff]);
 
@@ -423,6 +423,15 @@ export function buildAurora(scene) {
   for (const hs of hotspots) hs.marker = spotMarker(group, hs.pos, 0x9fd8ff);
   // 파티 차림: 오른쪽 뷔페, 케이크 옆 선물, 현수막, 입구 풍선 아치, 돔 안 고리 기둥 사이 깃발 줄
   const party = partyDressing(group, {
+    theme: 'aurora',
+    seating: [{ x: -16, z: 2.5, ry: Math.PI / 2 }, { x: -16, z: 9.5, ry: Math.PI / 2 }],
+    extras(deco, k) {
+      const swan = k.iceSwan();
+      swan.position.set(-6, 0, -9.5);
+      deco.add(swan);
+      k.obstacles.push({ x: -6, z: -9.5, r: 0.8 });
+      for (const z of [-5.4, 1.6]) { const t = k.litTree(); t.position.set(9, 0, z); deco.add(t); k.obstacles.push({ x: 9, z, r: 0.75 }); }
+    },
     buffet: { x: 9, z: -2, ry: -Math.PI / 2 },
     arch: { x: 0, z: R - 2.4 },
     banner: { x: 0, y: 3.0, z: -5.6 },
@@ -443,6 +452,8 @@ export function buildAurora(scene) {
     ...lights,
     bounds: { w: (R - 1.2) * 2, d: (R - 1.2) * 2, r: R - 1.2 },
     hotspots,
+    seats: party.seats,
+    props: party.props,
     roam: 15,
     zones: [{ kind: 'slide', test: (p) => (p.x - RINK.x) ** 2 + (p.z - RINK.z) ** 2 < rinkR * rinkR }],
     entrance: new THREE.Vector3(0, 0, R - 1.6),

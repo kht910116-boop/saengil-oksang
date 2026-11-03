@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { PAL, stars, moon, cakeTable, decoBalloons, stringLights, city, finishWorld, spotMarker, textPlane } from './common.js';
 import { sound } from '../audio.js';
-import { partyDressing } from './party.js';
+import { partyDressing, bbqGrillDeco, coolerDeco } from './party.js';
 
 // 도시 옥상: 불 켜진 도시가 내려다보이는 밤 옥상
 export function buildRooftop(scene) {
@@ -78,7 +78,7 @@ export function buildRooftop(scene) {
     obstacles.push({ x: px, z: pz, r: 0.8 });
   }
 
-  const cake = cakeTable(group);
+  const cake = cakeTable(group, { theme: 'rooftop' });
   obstacles.push(cake.obstacle);
   const balloons = decoBalloons(group);
 
@@ -194,6 +194,19 @@ export function buildRooftop(scene) {
   for (const hs of hotspots) hs.marker = spotMarker(group, hs.pos, hs.id === 'photo' ? 0xff7ab8 : 0xffc46b);
   // 파티 차림: 오른쪽 뷔페, 선물, 현수막, 계단 쪽 풍선 아치, 기둥 사이 깃발 줄
   const party = partyDressing(group, {
+    theme: 'rooftop',
+    seating: [{ x: -8.5, z: 5, ry: Math.PI / 2 }, { x: -8.5, z: 1.4, ry: Math.PI / 2 }],
+    extras(deco, k) {
+      const grill = bbqGrillDeco();
+      grill.position.set(8.5, 0, 6.6);
+      grill.rotation.y = -Math.PI / 2;
+      deco.add(grill);
+      k.obstacles.push({ x: 8.5, z: 6.6, r: 0.75 });
+      const cl = coolerDeco();
+      cl.position.set(8.6, 0, -2.6);
+      deco.add(cl);
+      k.obstacles.push({ x: 8.6, z: -2.6, r: 0.5 });
+    },
     buffet: { x: 8.5, z: 2, ry: -Math.PI / 2 },
     arch: { x: 0, z: D / 2 - 1.6 },
     banner: { x: 0, y: 3.0, z: -5.6 },
@@ -213,6 +226,8 @@ export function buildRooftop(scene) {
     ...lights,
     bounds: { w: W - 1.2, d: D - 1.2 },
     hotspots,
+    seats: party.seats,
+    props: party.props,
     roam: 15,
     zones: [{ kind: 'dance', test: onFloor }],
     extraUpdate(t, dt, ctx) {

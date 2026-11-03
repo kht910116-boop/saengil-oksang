@@ -198,7 +198,7 @@ export function buildSky(scene) {
   }
   // 벤치
   const benchMat = new THREE.MeshStandardMaterial({ color: 0x9a6a4c, roughness: 0.8 });
-  for (const [x, z, ry] of [[9, -6, -0.6], [-9, -7, 0.6], [-6, 13, 2.4]]) {
+  for (const [x, z, ry] of []) { // 벤치 대신 피크닉 담요(앉는 자리)
     const b = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.4, 0.7), benchMat);
     b.position.set(x, 0.4, z);
     b.rotation.y = ry;
@@ -206,7 +206,7 @@ export function buildSky(scene) {
     obstacles.push({ x, z, r: 1.2 });
   }
 
-  const cake = cakeTable(group, { legColor: 0x9a6a4c });
+  const cake = cakeTable(group, { legColor: 0x9a6a4c, theme: 'sky' });
   obstacles.push(cake.obstacle);
   const balloons = decoBalloons(group, undefined, [0xff9eb5, 0xffd97a, 0xffffff, 0xffb37a, PAL.lavender]);
 
@@ -291,6 +291,12 @@ export function buildSky(scene) {
   for (const hs of hotspots) hs.marker = spotMarker(group, hs.pos, 0xffb3c8);
   // 파티 차림: 왼쪽 뷔페, 선물, 현수막, 입구 풍선 아치, 둘레 기둥 사이 깃발 줄
   const party = partyDressing(group, {
+    theme: 'sky',
+    seating: [{ x: 8.5, z: -6.5, ry: -0.7 }, { x: -6.5, z: 13, ry: 2.5 }, { x: -9.5, z: -7, ry: 0.7 }],
+    extras(deco, k) {
+      for (const s2 of [-1, 1]) { const fp = k.flowerPot(s2 > 0 ? 0xf29bb3 : 0xb9a6f2); fp.position.set(s2 * 3.3, 0, -5.6); deco.add(fp); }
+      [[-2.8, 15], [2.8, 15], [-2.8, 18.5], [2.8, 18.5], [-2.8, 12], [2.8, 12]].forEach(([x, z], i) => { const pw = k.pinwheel([0xf29bb3, 0xffd97a, 0xb9a6f2][i % 3]); pw.position.set(x, 0, z); deco.add(pw); });
+    },
     buffet: { x: -8.5, z: 3, ry: Math.PI / 2 },
     arch: { x: 0, z: R - 2.4 },
     banner: { x: 0, y: 3.0, z: -5.6 },
@@ -310,6 +316,8 @@ export function buildSky(scene) {
     ...lights,
     bounds: { w: (R - 1.2) * 2, d: (R - 1.2) * 2, r: R - 1.2 },
     hotspots,
+    seats: party.seats,
+    props: party.props,
     roam: 15,
     zones: [{ kind: 'bounce', test: trampTest }],
     entrance: new THREE.Vector3(0, 0, R - 1.6),

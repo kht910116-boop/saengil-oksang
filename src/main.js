@@ -179,7 +179,7 @@ const people = [];
 const peersById = new Map();
 
 function addPerson(opts, pos, { isMe = false, isOwner = false, npc = false } = {}) {
-  const av = createAvatar({ color: opts.color, hat: true, hatColor: isOwner ? 0xffd34d : opts.hatColor ?? HAT_COLORS[0], crown: isOwner, outfit: OUTFITS[opts.outfit] ? opts.outfit : DEFAULT_OUTFIT, accessory: ACCESSORIES[opts.acc] ? opts.acc : null });
+  const av = createAvatar({ props: world.props, color: opts.color, hat: true, hatColor: isOwner ? 0xffd34d : opts.hatColor ?? HAT_COLORS[0], crown: isOwner, outfit: OUTFITS[opts.outfit] ? opts.outfit : DEFAULT_OUTFIT, accessory: ACCESSORIES[opts.acc] ? opts.acc : null });
   av.root.position.copy(pos);
   scene.add(av.root);
   const label = document.createElement('div');
@@ -287,6 +287,7 @@ function loadVenue(id) {
   clearSpotLabels();
   world = buildWorld(scene, v);
   sound.setVenue(v);
+  for (const p of people) p.av.setProps?.(world.props);
   computeSlots();
   lanterns.forEach((l, i) => {
     const at = slots[i % slots.length];
@@ -505,6 +506,20 @@ function updateNpc(p, dt) {
     p.dirX = 0;
     // 서 있는 동안 가끔 동작(샘플 친구들)
     p.emoteT = (p.emoteT ?? 2 + Math.random() * 6) - dt;
+    if (p.emoteT <= 0 && !ceremony && MODE === 'demo' && Math.random() < 0.25) {
+      // 가끔 근처 친구와 같이 하는 동작
+      const kinds = Object.keys(GROUP_MOTIONS);
+      const kind = kinds[Math.floor(Math.random() * kinds.length)];
+      const two = kind === 'highfive' || kind === 'hug';
+      const others = nearbyFor(p, two ? 1 : 4).filter((q) => q.npc);
+      if (others.length + 1 >= GROUP_MOTIONS[kind][1] && kind !== 'selfie') {
+        const o0 = others[0].av.root.position;
+        const pp = p.av.root.position;
+        startGroupMotion(kind, p, others, { cx: two ? (pp.x + o0.x) / 2 : pp.x, cz: two ? (pp.z + o0.z) / 2 : pp.z, ang: Math.atan2(o0.z - pp.z, o0.x - pp.x), at: Date.now() + 200 });
+        p.emoteT = 8 + Math.random() * 8;
+        return;
+      }
+    }
     if (p.emoteT <= 0 && !ceremony) {
       p.emoteT = 5 + Math.random() * 8;
       const pick = EMOTES[Math.floor(Math.random() * EMOTES.length)][0];
@@ -627,7 +642,7 @@ function startIgnite(opts = {}) {
   ignite = { t: 0, clicked: new Set() };
   ignitedThisSession = true;
   document.body.classList.add('is-igniting');
-  sound.music('midnight', 'rooftop');
+  sound.music('midnight', 'party'); // 점등 곡이 끝나면 파티 곡으로
   if (!lite) recorder.start();
   track('ignite_seen');
   document.querySelector('#goal').hidden = true;
@@ -1332,10 +1347,17 @@ function wireEmotes() {
   const panel = document.createElement('div');
   panel.id = 'emotes';
   panel.hidden = true;
-  panel.innerHTML = EMOTES.map(([k, n]) => `<button type="button" data-emote="${k}">${n}</button>`).join('');
+  const renderPanel = () => {
+    const near = me ? nearbyFor(me, 7).length : 0;
+    panel.innerHTML = `${EMOTES.map(([k, n]) => `<button type="button" data-emote="${k}">${n}</button>`).join('')}
+      <p class="emote-sub">같이 하기 · 근처 친구 ${near}명</p>
+      ${Object.entries(GROUP_MOTIONS).map(([k, [n, min]]) => `<button type="button" class="gm" data-gm="${k}"${near + 1 < min ? ' disabled' : ''}>${n}</button>`).join('')}`;
+  };
   document.body.appendChild(panel);
-  open.addEventListener('click', () => { panel.hidden = !panel.hidden; });
+  open.addEventListener('click', () => { if (panel.hidden) renderPanel(); panel.hidden = !panel.hidden; });
   panel.addEventListener('click', (e) => {
+    const gmb = e.target.closest('[data-gm]');
+    if (gmb && !gmb.disabled) { requestGroupMotion(gmb.dataset.gm); panel.hidden = true; return; }
     const b = e.target.closest('[data-emote]');
     if (!b) return;
     try { navigator.vibrate?.(10); } catch { /* 진동 없는 기기 */ }
@@ -1343,6 +1365,128 @@ function wireEmotes() {
     panel.hidden = true;
   });
 }
+// ── 같이 하는 동작: 근처 친구와 하이파이브·포옹·빙글빙글·기차놀이·단체 셀카 ──
+// 시작한 사람이 근처 사람을 모으고, 서버가 정한 같은 시각부터 모두의 화면에서 같은 안무를 한다.
+const GROUP_MOTIONS = { highfive: ['하이파이브', 2, 2.2], hug: ['포옹', 2, 2.8], ring: ['손잡고 빙글빙글', 3, 6.4], conga: ['기차놀이', 3, 7.4], selfie: ['단체 셀카', 2, 3.4] };
+const GM_RANGE = 3.2;
+function nearbyFor(person, max) {
+  const pos = person.av.root.position;
+  return people
+    .filter((p) => p !== person && !p.gm && !(p.busyUntil > performance.now()) && p.av.root.position.distanceTo(pos) < GM_RANGE)
+    .sort((a, b) => a.av.root.position.distanceToSquared(pos) - b.av.root.position.distanceToSquared(pos))
+    .slice(0, max);
+}
+function startGroupMotion(kind, lead, others, { cx, cz, ang, at }) {
+  const def = GROUP_MOTIONS[kind];
+  if (!def || !lead || ceremony) return;
+  const list = [lead, ...others].filter((p) => p && !p.gm);
+  if (list.length < def[1]) return;
+  const start = at;
+  const dur = def[2];
+  list.forEach((p, i) => {
+    p.gm = { kind, i, n: list.length, start, dur, cx, cz, ang, list, fired: false };
+    p.busyUntil = start + dur * 1000 + 200;
+    p.target = null;
+    p.av.pose = null;
+  });
+  if (kind === 'selfie' && lead === me) setStatus('다 같이 모여요! 단체 셀카', 3000);
+}
+function requestGroupMotion(kind) {
+  const def = GROUP_MOTIONS[kind];
+  if (!me || !def || ceremony) return;
+  const max = kind === 'highfive' || kind === 'hug' ? 1 : 7;
+  const others = nearbyFor(me, max);
+  if (others.length + 1 < def[1]) return setStatus(`${def[0]}는 근처에 친구가 ${def[1] - 1}명 이상 있어야 해요`);
+  const pos = me.av.root.position;
+  const o0 = others[0].av.root.position;
+  const two = max === 1;
+  const cx = two ? (pos.x + o0.x) / 2 : pos.x;
+  const cz = two ? (pos.z + o0.z) / 2 : pos.z;
+  const ang = Math.atan2(o0.z - pos.z, o0.x - pos.x);
+  const at = Date.now() + 400;
+  startGroupMotion(kind, me, others, { cx, cz, ang, at });
+  // 실제 친구만 서버로(샘플 친구는 내 화면에서만)
+  const ids = others.map((p) => [...peersById.entries()].find(([, v]) => v === p)?.[0]).filter(Boolean);
+  if (conn && ids.length) conn.send({ t: 'gmo', kind, ids, cx, cz, ang });
+  track('group_motion');
+}
+function updateGroupMotions(dt) {
+  const now = Date.now();
+  for (const p of people) {
+    const g = p.gm;
+    if (!g) continue;
+    const t = (now - g.start) / 1000;
+    if (t > g.dur) { finishGroupMotion(p); continue; }
+    const pos = p.av.root.position;
+    const want = tmp2.set(g.cx, 0, g.cz);
+    let face = null;
+    const u = { x: Math.cos(g.ang), z: Math.sin(g.ang) };
+    if (g.kind === 'highfive' || g.kind === 'hug') {
+      const half = g.kind === 'hug' ? 0.31 : 0.45;
+      const s = g.i === 0 ? -1 : 1;
+      want.x += u.x * half * s;
+      want.z += u.z * half * s;
+      face = tmp3.set(g.cx - u.x * half * s * 3, 0, g.cz - u.z * half * s * 3);
+      if (!g.fired && t > 0.55) {
+        g.fired = true;
+        p.av.gesture(g.kind);
+        if (g.i === 0) {
+          if (g.kind === 'highfive') setTimeout(() => { sound.react('clap', g.list.includes(me)); sparks.burst?.(); }, 420);
+          else { sound.react('heart', g.list.includes(me)); setTimeout(() => g.list.forEach((q) => showFloat(q, '♥', 'react-heart')), 500); }
+        }
+      }
+    } else if (g.kind === 'ring') {
+      const r = Math.max(0.95, 0.5 + 0.24 * g.n);
+      const a = (g.i / g.n) * Math.PI * 2 + Math.max(0, t - 0.8) * 1.5;
+      want.x += Math.cos(a) * r;
+      want.z += Math.sin(a) * r;
+      face = tmp3.set(g.cx, 0, g.cz);
+      p.av.sway = t > 0.8 ? 1 : 0;
+      p.av.swayPhase = t * 7;
+      if (!g.fired) { g.fired = true; p.av.gesture('ringhands'); if (g.i === 0) sound.react('party', g.list.includes(me)); }
+    } else if (g.kind === 'conga') {
+      const R = 2.6;
+      const base = g.ang + Math.PI; // 시작한 사람 뒤쪽을 중심으로 돈다
+      const ccx = g.cx + Math.cos(base) * -R;
+      const ccz = g.cz + Math.sin(base) * -R;
+      const th = base + Math.max(0, t - 0.6) * 0.75 - g.i * 0.42;
+      want.set(ccx + Math.cos(th) * R, 0, ccz + Math.sin(th) * R);
+      face = tmp3.set(want.x - Math.sin(th) * 2, 0, want.z + Math.cos(th) * 2);
+      p.av.sway = t > 0.6 ? 1 : 0;
+      p.av.swayPhase = t * 8;
+      if (!g.fired) { g.fired = true; p.av.gesture('conga'); if (g.i === 0) sound.partyHorn(); }
+    } else if (g.kind === 'selfie') {
+      const off = g.i - (g.n - 1) / 2;
+      want.x += off * 0.72;
+      want.z += -Math.abs(off) * 0.22;
+      p.av.faceCamera = true;
+      if (!g.fired && t > 1.3) {
+        g.fired = true;
+        p.av.gesture(g.i % 2 ? 'heart' : 'cheer');
+        if (g.i === 0 && p === me) {
+          viewOverride = { pos: new THREE.Vector3(g.cx, 1.7, g.cz + 3.4), look: new THREE.Vector3(g.cx, 1.0, g.cz), fov: 55, until: performance.now() + 1700 };
+          setTimeout(() => { spotShotTitle = '단체 셀카'; groupShotPending = true; sound.shutter(); }, 900);
+        }
+      }
+    }
+    collide(want); // 케이크·테이블을 뚫고 지나가지 않게
+    const d = pos.distanceTo(want);
+    const step = Math.min(d, dt * 4.5);
+    if (d > 0.01) pos.add(tmp.copy(want).sub(pos).multiplyScalar(step / d));
+    p.speed = d > 0.05 ? 1 : 0;
+    if (face) p.av.faceTarget = face.clone();
+    if (p.net && !p.isMe) p.net.copy(pos);
+  }
+}
+function finishGroupMotion(p) {
+  p.gm = null;
+  p.busyUntil = 0;
+  p.av.faceTarget = null;
+  p.av.faceCamera = false;
+  p.av.sway = 0;
+  p.wait = 2 + Math.random() * 3;
+}
+
 // 조는 동안 머리 위에 Zzz
 let zzzT = 0;
 function updatePoses(dt) {
@@ -1350,6 +1494,34 @@ function updatePoses(dt) {
   if (zzzT > 0) return;
   zzzT = 1.4;
   for (const p of people) if (p.av.pose === 'sleep') showFloat(p, 'Zzz', 'emote-zzz');
+}
+
+// ── 겹침 방지: 사람끼리 너무 가까우면 서로 살짝 밀어낸다 ──
+// 내 인형과 샘플 친구들만 실제로 움직인다(다른 사람은 그 사람 화면에서 스스로 비켜서 위치가 온다).
+function separatePeople(dt) {
+  if (ceremony || groupPhoto || procession) return; // 대열을 맞출 때는 정해진 자리
+  const MIN = 0.86;
+  const now = performance.now();
+  for (let i = 0; i < people.length; i++) {
+    const a = people[i];
+    for (let j = i + 1; j < people.length; j++) {
+      const b = people[j];
+      const pa = a.av.root.position;
+      const pb = b.av.root.position;
+      const dx = pb.x - pa.x;
+      const dz = pb.z - pa.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 >= MIN * MIN) continue;
+      if (a.gm || b.gm) continue; // 같이 하는 동작(포옹 등)은 붙어 있어야 한다
+      const d = Math.sqrt(d2) || 0.001;
+      const push = Math.min(MIN - d, dt * 4) / d;
+      const canA = (a.isMe || a.npc) && !(a.busyUntil > now) && a.av.pose !== 'sit';
+      const canB = (b.isMe || b.npc) && !(b.busyUntil > now) && b.av.pose !== 'sit';
+      const share = canA && canB ? 0.5 : 1;
+      if (canA) { pa.x -= dx * push * share; pa.z -= dz * push * share; collide(pa); }
+      if (canB) { pb.x += dx * push * share; pb.z += dz * push * share; collide(pb); }
+    }
+  }
 }
 
 // ── 장소별 놀거리: 가까이 가면 버튼이 뜨고, 함께 보는 놀거리는 모두의 화면에서 똑같이 일어난다 ──
@@ -1366,8 +1538,28 @@ let spotShotTitle = null; // 포토존 사진 제목 // 망원경·포토존처�
 function spotCtx(person) {
   return { person, isMe: person === me, sound, confetti, sparks, people, setStatus, now: performance.now() };
 }
+// 앉기: 가장 가까운 빈자리로 가서 앉는다. 자리·높이는 위치로 정하므로 모두의 화면에서 같다.
+function seatNear(pos, maxD = 0.4) {
+  let best = null;
+  let bd = maxD;
+  for (const st of world.seats || []) { const d = Math.hypot(st.pos.x - pos.x, st.pos.z - pos.z); if (d < bd) { bd = d; best = st; } }
+  return best;
+}
+function sitDown(person) {
+  const free = (world.seats || []).filter((st) => !people.some((p) => p !== person && p.av.pose === 'sit' && Math.hypot(p.av.root.position.x - st.pos.x, p.av.root.position.z - st.pos.z) < 0.3));
+  if (!free.length) { if (person === me) setStatus('빈자리가 없어요'); return; }
+  const pos = person.av.root.position;
+  free.sort((a, b) => a.pos.distanceToSquared(pos) - b.pos.distanceToSquared(pos));
+  const st = free[0];
+  pos.set(st.pos.x, 0, st.pos.z);
+  person.target = null;
+  if (person.net && person !== me) person.net.copy(pos);
+  if (person === me) sendEmote('sit');
+  else playEmote(person, 'sit');
+}
 function useHotspot(hs, person, { remote = false } = {}) {
   if (!hs || ceremony) return;
+  if (hs.seat) return sitDown(person);
   const res = hs.run?.(spotCtx(person)) || {};
   if (res.emote) { if (person === me && !remote) sendEmote(res.emote); else playEmote(person, res.emote); }
   if (person === me) {
@@ -1401,6 +1593,7 @@ function updateSpots() {
   if (me && !ceremony && !ignite && !groupPhoto && !procession && !(me.busyUntil > performance.now())) {
     let bd = Infinity;
     for (const hs of spots) {
+      if (hs.seat && me.av.pose === 'sit') continue; // 이미 앉아 있으면 '앉기' 버튼은 숨긴다
       const d = me.av.root.position.distanceTo(hs.pos);
       if (d < (hs.r || 2.4) && d < bd) { bd = d; best = hs; }
     }
@@ -1428,6 +1621,14 @@ function applyZones(t, dt) {
     const z = !ceremony && world.zoneAt?.(p.av.root.position);
     let lift = 0;
     if (ceremony?.kind === 'candles' && p === ceremonyLead() && p.av.root.position.distanceTo(LEAD_SPOT.candles) < 0.4) lift = PODIUM_H; // 단상 위
+    // 의자에 앉은 사람: 자리 높이만큼 올라가고 의자가 보는 쪽을 본다
+    const st = p.av.pose === 'sit' ? seatNear(p.av.root.position) : null;
+    if (st) {
+      lift = st.h;
+      p.seatFace = p.seatFace || new THREE.Vector3();
+      p.av.faceTarget = p.seatFace.set(p.av.root.position.x + Math.sin(st.face) * 3, 0, p.av.root.position.z + Math.cos(st.face) * 3);
+      p.onSeat = true;
+    } else if (p.onSeat) { p.onSeat = false; p.av.faceTarget = null; }
     if (z?.kind === 'float') lift = 0.9 + Math.sin(t * 1.3 + i) * 0.3;
     else if (z?.kind === 'bounce') lift = Math.abs(Math.sin(t * 2.6 + i * 0.7)) * 2.3;
     p.av.lift = z?.kind === 'bounce' ? lift : THREE.MathUtils.lerp(p.av.lift, lift, Math.min(1, dt * 3));
@@ -1490,7 +1691,7 @@ function startCeremony(kind) {
   hideBubble();
   if (!sheetLocked) closeSheet();
   ceremony = { kind, slots: ceremonySpots(kind) };
-  for (const p of people) { p.target = null; p.goal = null; p.busyUntil = 0; p.av.lift = 0; p.av.pose = null; }
+  for (const p of people) { if (p.gm) finishGroupMotion(p); p.target = null; p.goal = null; p.busyUntil = 0; p.av.lift = 0; p.av.pose = null; }
   viewOverride = null;
   document.body.classList.remove('scope-view');
   document.body.classList.add('ceremony');
@@ -1813,8 +2014,10 @@ function startProcession(owner, { then = null } = {}) {
   if (owner.net) owner.net.copy(from);
   owner.target = null;
   procession = { owner, from, to, t: 0, dur: 9, slots, clap: 0, then };
-  sound.duck(5, 0.2);
-  sound.fanfare();
+  // 입장 음악(팡파르 곡)을 한 번 틀고 원래 곡으로 돌아간다. 곡이 없으면 코드로 만든 팡파르
+  const back = sound.track && sound.track !== 'fanfare' ? sound.track : 'rooftop';
+  if (sound.enabled) sound.music('fanfare', back);
+  else sound.fanfare();
   setStatus(`${josa(ROOF_STATE.owner, '이가')} 입장해요! 박수로 맞아주세요`, 6000);
   return true;
 }
@@ -2424,7 +2627,7 @@ async function openDoor() {
 }
 
 function enterRoom(visitor) {
-  sound.music('rooftop');
+  sound.music(serverNow() >= ROOF_STATE.igniteAt ? 'party' : 'rooftop'); // 점등이 지났으면 파티 곡
   track(ROOF_STATE.isOwner ? 'owner_enter' : 'friend_visit');
   const spawn = new THREE.Vector3((Math.random() - 0.5) * 4, 0, 3 + Math.random() * 2);
   me = addPerson({ name: ROOF_STATE.isOwner ? ROOF_STATE.owner : visitor.name, color: visitor.color, hatColor: 0x8fd3c1, outfit: visitor.outfit, acc: visitor.acc }, spawn, { isMe: true, isOwner: ROOF_STATE.isOwner });
@@ -2507,6 +2710,10 @@ function handleNet(m) {
   } else if (m.t === 'candles') {
     if (m.songAt) startSong(m.songAt - serverOffset);
     else blowCandles(true);
+  } else if (m.t === 'gmo') {
+    const lead = peersById.get(m.by);
+    const others = (m.ids || []).map((id) => (id === myId ? me : peersById.get(id))).filter(Boolean);
+    startGroupMotion(m.kind, lead, others, { cx: m.cx, cz: m.cz, ang: m.ang, at: m.at - serverOffset });
   } else if (m.t === 'emote') {
     playEmote(peersById.get(m.id), m.kind);
   } else if (m.t === 'fx') {
@@ -2595,6 +2802,8 @@ function frame() {
     }
   }
   updateCandleBlow(dt);
+  updateGroupMotions(dt);
+  separatePeople(dt);
   applyZones(t, dt);
   updatePoses(dt);
   updateSpots();
@@ -2751,6 +2960,10 @@ window.__lantern = {
   goSpot(id) { const h = (world.hotspots || []).find((x) => x.id === id); if (h && me) { me.av.root.position.set(h.pos.x, 0, h.pos.z + 0.3); me.target = null; } },
   get lift() { return me ? me.av.lift : 0; },
   emote(kind) { sendEmote(kind); },
+  // 시험용: 샘플 친구 n명을 내 옆으로 데려오고 같이 하는 동작 시작
+  gather(n = 3) { people.filter((p) => p.npc).slice(0, n).forEach((p, i) => { p.target = null; p.wait = 30; p.av.root.position.set(me.av.root.position.x + (i - 1) * 1.1, 0, me.av.root.position.z - 1.2); }); },
+  gm(kind) { requestGroupMotion(kind); },
+  get gmActive() { return people.filter((p) => p.gm).length; },
   // 시험용: 사람·등불을 한꺼번에 늘려 꽉 찬 파티장을 흉내 낸다
   crowd(n = 33, nl = 44) {
     const outfits = ['dress', 'suit', 'party'];
