@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PAL, skyDome, stars, cakeTable, decoBalloons, stringLights, finishWorld, spotMarker, puffs } from './common.js';
+import { PAL, skyDome, stars, cakeTable, decoBalloons, stringLights, finishWorld, spotMarker, puffs, mergeStatic } from './common.js';
 import { sound } from '../audio.js';
 
 // 구름 위 열기구 광장: 노을 진 구름 바다 위에 떠 있는 둥근 광장, 주변을 열기구들이 둥실 떠다닌다.
@@ -125,13 +125,14 @@ export function buildSky(scene) {
   // 바닥 둘레 꽃 화단과 낮은 난간(입구 쪽은 비움)
   const railMat = new THREE.MeshStandardMaterial({ color: 0xfaf3e8, roughness: 0.5 });
   const flowerCols = [0xff8fab, 0xffd166, 0xffffff, 0xc9a7ff];
+  const railG = new THREE.Group();
   const N = 76;
   for (let i = 0; i < N; i++) {
     const a = (i / N) * Math.PI * 2;
     if (Math.abs(Math.atan2(Math.sin(a - Math.PI / 2), Math.cos(a - Math.PI / 2))) < 0.16) continue;
     const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.9, 6), railMat);
     post.position.set(Math.cos(a) * (R - 0.25), 0.45, Math.sin(a) * (R - 0.25));
-    group.add(post);
+    railG.add(post);
     const a2 = ((i + 1) / N) * Math.PI * 2;
     if (Math.abs(Math.atan2(Math.sin(a2 - Math.PI / 2), Math.cos(a2 - Math.PI / 2))) < 0.16) continue;
     const mid = (a + a2) / 2;
@@ -139,13 +140,15 @@ export function buildSky(scene) {
     const bar = new THREE.Mesh(new THREE.BoxGeometry(len, 0.08, 0.08), railMat);
     bar.position.set(Math.cos(mid) * (R - 0.25), 0.9, Math.sin(mid) * (R - 0.25));
     bar.rotation.y = -mid + Math.PI / 2;
-    group.add(bar);
+    railG.add(bar);
     if (i % 2 === 0) {
       const f = new THREE.Mesh(new THREE.IcosahedronGeometry(0.28, 0), new THREE.MeshStandardMaterial({ color: flowerCols[i % 4], roughness: 0.7, flatShading: true }));
       f.position.set(Math.cos(mid) * (R - 0.7), 0.2, Math.sin(mid) * (R - 0.7));
-      group.add(f);
+      railG.add(f);
     }
   }
+
+  group.add(mergeStatic(railG));
 
   const obstacles = [];
   // 탈 수 있는 열기구 3대
@@ -219,13 +222,14 @@ export function buildSky(scene) {
 
   // 구름 바다(아래)와 떠다니는 구름(옆)
   const cloudMat = new THREE.MeshStandardMaterial({ color: 0xfff2f0, roughness: 1, emissive: 0xc07a9a, emissiveIntensity: 0.35 });
+  const cloudG = new THREE.Group();
   const clouds = [];
   for (let i = 0; i < 60; i++) {
     const a = Math.random() * Math.PI * 2;
     const d = 18 + Math.random() * 150;
     const c = cloud(3 + Math.random() * 5, cloudMat);
     c.position.set(Math.cos(a) * d, -12 - Math.random() * 10, Math.sin(a) * d);
-    group.add(c);
+    cloudG.add(c);
     clouds.push(c);
   }
   for (let i = 0; i < 14; i++) {
@@ -233,9 +237,11 @@ export function buildSky(scene) {
     const d = 40 + Math.random() * 90;
     const c = cloud(2 + Math.random() * 3, cloudMat);
     c.position.set(Math.cos(a) * d, 4 + Math.random() * 25, Math.sin(a) * d);
-    group.add(c);
+    cloudG.add(c);
     clouds.push(c);
   }
+
+  group.add(mergeStatic(cloudG)); // 구름 70여 개를 한 덩어리로
 
   // 주변을 떠다니는 열기구들
   const fliers = [];
@@ -307,7 +313,7 @@ export function buildSky(scene) {
         hb.position.set(Math.cos(u.ang) * u.dist, u.baseY + Math.sin(t * 0.5 + u.ph) * 1.2, Math.sin(u.ang) * u.dist);
         hb.rotation.y += dt * 0.05;
       }
-      for (let i = 0; i < clouds.length; i++) clouds[i].position.x += Math.sin(i) * dt * 0.15;
+      cloudG.position.x = Math.sin(t * 0.03) * 3; // 구름 전체가 천천히 흘러간다
       // 열기구 타기: 타고 → 위로 → 둥실 → 내려와 내린다(약 16초)
       const now = performance.now();
       for (const dk of docks) {

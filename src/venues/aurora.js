@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PAL, skyDome, stars, cakeTable, decoBalloons, stringLights, finishWorld, spotMarker, puffs } from './common.js';
+import { PAL, skyDome, stars, cakeTable, decoBalloons, stringLights, finishWorld, spotMarker, puffs, mergeStatic } from './common.js';
 import { sound } from '../audio.js';
 
 // 오로라 유리돔: 눈 덮인 설원 한가운데 투명한 유리 돔. 점등 때 오로라가 하늘을 덮는다.
@@ -135,23 +135,25 @@ export function buildAurora(scene) {
     new THREE.MeshStandardMaterial({ color: 0xbfe2ff, transparent: true, opacity: 0.07, roughness: 0.05, metalness: 0.4, side: THREE.DoubleSide, depthWrite: false }),
   );
   group.add(glass);
+  const ribs = new THREE.Group();
   const ribMat = new THREE.MeshStandardMaterial({ color: 0xd8dde8, roughness: 0.35, metalness: 0.6 });
   for (let i = 0; i < 6; i++) {
     const rib = new THREE.Mesh(new THREE.TorusGeometry(R, 0.06, 6, 64, Math.PI), ribMat);
     rib.rotation.y = (i / 6) * Math.PI;
-    group.add(rib);
+    ribs.add(rib);
   }
   for (const y of [R * 0.45, R * 0.8]) {
     const rr = Math.sqrt(R * R - y * y);
     const ring = new THREE.Mesh(new THREE.TorusGeometry(rr, 0.05, 6, 64), ribMat);
     ring.rotation.x = Math.PI / 2;
     ring.position.y = y;
-    group.add(ring);
+    ribs.add(ring);
   }
   const base = new THREE.Mesh(new THREE.TorusGeometry(R, 0.12, 8, 64), ribMat);
   base.rotation.x = Math.PI / 2;
   base.position.y = 0.05;
-  group.add(base);
+  ribs.add(base);
+  group.add(mergeStatic(ribs));
   // 입구 아치
   const arch = new THREE.Mesh(new THREE.TorusGeometry(1.4, 0.1, 8, 24, Math.PI), ribMat);
   arch.position.set(0, 1.4, R - 0.05);
@@ -220,6 +222,7 @@ export function buildAurora(scene) {
   cable.position.y = 8.2 + (R - 8.2) / 2;
   group.add(cable);
 
+  const outside = new THREE.Group();
   // 바깥: 눈 덮인 소나무 숲과 먼 산
   for (let i = 0; i < 70; i++) {
     const a = Math.random() * Math.PI * 2;
@@ -227,7 +230,7 @@ export function buildAurora(scene) {
     const p = pine(1 + Math.random() * 1.6);
     p.position.set(Math.cos(a) * d, -0.6, Math.sin(a) * d);
     p.rotation.y = Math.random() * 6;
-    group.add(p);
+    outside.add(p);
   }
   const mtMat = new THREE.MeshStandardMaterial({ color: 0x31435f, roughness: 1, flatShading: true });
   const capMat = new THREE.MeshStandardMaterial({ color: 0xe8f0ff, roughness: 1, flatShading: true });
@@ -240,8 +243,10 @@ export function buildAurora(scene) {
     m.position.set(Math.cos(a) * d, h / 2 - 2, Math.sin(a) * d);
     const cap = new THREE.Mesh(new THREE.ConeGeometry(r * 0.32, h * 0.32, 6), capMat);
     cap.position.set(m.position.x, h - 2 - h * 0.16, m.position.z);
-    group.add(m, cap);
+    outside.add(m, cap);
   }
+
+  group.add(mergeStatic(outside));
 
   stars(group, { count: 1300, color: 0xeaf2ff });
 

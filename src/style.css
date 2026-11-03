@@ -538,3 +538,9 @@ body.ceremony #emotes, body.ceremony #reactions [data-emote-open] { display: non
 .emote-bang { color: #ffd34d; font-size: 30px; }
 .emote-cry { color: #9fd8ff; font-size: 18px; }
 .emote-zzz { color: #c9d0ff; font-size: 16px; font-style: italic; }
+
+/* 작은 휴대폰: 오른쪽 위 버튼은 아이콘만(소리·등불 수·접속 수는 글자 유지) */
+@media (max-width: 430px) {
+  .top-right .icon-btn:not(#btn-sound):not(#btn-letters) span { display: none; }
+  .top-right .icon-btn:not(#btn-sound):not(#btn-letters) { padding: 9px; }
+}

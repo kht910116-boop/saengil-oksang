@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeStatic } from './merge.js';
 
 // 말랑한 마시멜로 인형: 통통한 몸통 하나에 작은 팔다리. 걸을 때 젤리처럼 출렁인다.
 const INK = 0x2a2238;
@@ -31,8 +32,17 @@ const mouthGeo = new THREE.TorusGeometry(0.05, 0.012, 6, 16, Math.PI);
 const inkMat = new THREE.MeshBasicMaterial({ color: INK });
 const cheekMat = new THREE.MeshBasicMaterial({ color: CHEEK, transparent: true, opacity: 0.8, depthWrite: false });
 
+// 같은 색·밝기의 재료는 모든 인형이 함께 쓴다(휴대폰에서 그리는 부담을 줄임)
+const softCache = new Map();
 function soft(color, emissive = 0.16) {
-  return new THREE.MeshStandardMaterial({ color, roughness: 0.62, metalness: 0, emissive: color, emissiveIntensity: emissive });
+  const c = new THREE.Color(color);
+  const key = `${c.getHexString()}|${emissive}`;
+  let m = softCache.get(key);
+  if (!m) {
+    m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.62, metalness: 0, emissive: c, emissiveIntensity: emissive });
+    softCache.set(key, m);
+  }
+  return m;
 }
 // 옷 색을 살짝 밝힌 마시멜로 색
 function pastel(hex, k = 0.28) {
@@ -43,7 +53,7 @@ function partyHat(color) {
   const g = new THREE.Group();
   const cone = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.42, 20), soft(color, 0.2));
   cone.position.y = 0.21;
-  const stripe = new THREE.Mesh(new THREE.TorusGeometry(0.115, 0.018, 6, 20), soft(0xfbf4e8, 0.25));
+  const stripe = new THREE.Mesh(new THREE.TorusGeometry(0.115, 0.018, 6, 20), soft(0xfbf4e8, 0.3));
   stripe.rotation.x = Math.PI / 2;
   stripe.position.y = 0.14;
   const pom = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 10), soft(0xfbf4e8, 0.3));
@@ -54,9 +64,8 @@ function partyHat(color) {
 
 function crown() {
   const g = new THREE.Group();
-  const gold = new THREE.MeshStandardMaterial({ color: 0xffd34d, roughness: 0.35, metalness: 0.35, emissive: 0xffb800, emissiveIntensity: 0.25 });
+  const gold = GOLD_MAT;
   const band = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.1, 24, 1, true), gold);
-  band.material.side = THREE.DoubleSide;
   band.position.y = 0.05;
   g.add(band);
   for (let i = 0; i < 5; i++) {
@@ -71,7 +80,8 @@ function crown() {
 }
 
 // ── 파티 의상: 드레스·정장·파티복. 옷 색은 그 사람의 색을 따른다 ──
-const GOLD = () => new THREE.MeshStandardMaterial({ color: 0xffd34d, roughness: 0.3, metalness: 0.5, emissive: 0xffb800, emissiveIntensity: 0.25 });
+const GOLD_MAT = new THREE.MeshStandardMaterial({ color: 0xffd34d, roughness: 0.3, metalness: 0.5, emissive: 0xffb800, emissiveIntensity: 0.25, side: THREE.DoubleSide });
+const GOLD = () => GOLD_MAT;
 
 function dress(color) {
   const g = new THREE.Group();
@@ -219,7 +229,7 @@ export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46
   mouth.position.set(0, 0.73, 0.44);
   mouth.rotation.z = Math.PI;
   face.add(eL, eR, cL, cR, mouth);
-  jelly.add(face);
+  jelly.add(mergeStatic(face));
 
   // 팔(옷 색)·발
   const limbMat = soft(color, 0.12);
@@ -238,7 +248,7 @@ export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46
   jelly.add(armL, armR);
   const wear = OUTFIT_BUILDERS[outfit]?.(color) || null;
   if (wear) {
-    jelly.add(wear.group);
+    jelly.add(mergeStatic(wear.group));
     if (wear.sleeve) { aL.material = wear.sleeve; aR.material = wear.sleeve; }
   }
   const footL = new THREE.Mesh(footGeo, limbMat);
@@ -258,13 +268,17 @@ export function createAvatar({ color = 0xf29bb3, hat = false, hatColor = 0xffc46
   let capeG = null;
 
   if (wearsCrown) {
-    const c = crown();
+    const c = mergeStatic(crown());
     c.position.y = 1.1;
     jelly.add(c);
     capeG = cape();
+    const capePos = capeG.position.clone();
+    capeG.position.set(0, 0, 0);
+    mergeStatic(capeG);
+    capeG.position.copy(capePos);
     jelly.add(capeG);
   } else if (hat) {
-    const h = partyHat(hatColor);
+    const h = mergeStatic(partyHat(hatColor));
     h.position.set(0.08, 1.08, 0);
     h.rotation.z = -0.22;
     jelly.add(h);

@@ -190,17 +190,33 @@ function player(name) {
   const a = new Audio(t.src);
   a.loop = t.loop;
   a.preload = 'auto';
-  a.volume = 0;
+  // 아이폰은 audio.volume 을 무시해서(항상 최대), 음량은 Web Audio 의 gain 으로 조절한다
+  if (!ctx) ensure();
+  try {
+    const g = ctx.createGain();
+    g.gain.value = 0;
+    ctx.createMediaElementSource(a).connect(g).connect(master);
+    a._gain = g;
+  } catch { a.volume = 0; }
   a.dataset.missing = '';
   a.addEventListener('error', () => { a.dataset.missing = '1'; });
   a.addEventListener('ended', () => { if (wanted === name && after) { const next = after; after = null; sound.music(next); } });
   players[name] = a;
-  // 녹화 중이면 새 곡도 녹화 소리에 연결
-  if (sound._dest) { try { ctx.createMediaElementSource(a).connect(master); } catch { /* 이미 연결됨 */ } }
   return a;
 }
 
 function fade(a, to, ms = 900) {
+  if (a._gain) {
+    const g = a._gain.gain;
+    const now = ctx.currentTime;
+    g.cancelScheduledValues(now);
+    g.setValueAtTime(g.value, now);
+    g.linearRampToValueAtTime(to, now + ms / 1000);
+    a._target = to;
+    clearTimeout(a._fade);
+    if (to === 0) a._fade = setTimeout(() => { if (a._target === 0) a.pause(); }, ms + 50);
+    return;
+  }
   const from = a.volume;
   const start = performance.now();
   clearInterval(a._fade);
@@ -248,6 +264,8 @@ export const sound = {
   get enabled() { return on; },
   async toggle() {
     ensure();
+    // 아이폰은 화면을 누른 그 순간에 재생을 시작해야 소리가 난다(기다린 뒤에 틀면 막힘)
+    if (!on && wanted && TRACKS[wanted]) { try { const a = player(wanted); a.play().catch(() => {}); } catch { /* 다음에 다시 */ } }
     if (ctx.state === 'suspended') await ctx.resume();
     on = !on;
     master.gain.setTargetAtTime(on ? 0.8 : 0, ctx.currentTime, 0.1);

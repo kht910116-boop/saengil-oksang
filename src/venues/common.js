@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { mergeStatic } from '../merge.js';
+export { mergeStatic };
 
 // 여러 파티 장소가 같이 쓰는 3D 부품: 하늘, 별, 달, 케이크 테이블, 풍선, 전구 줄, 도시 야경
 export const PAL = {
@@ -131,10 +133,8 @@ export function stringLights(group, polePts, spans, { drawPoles = true, poleColo
     }
   }
   const wireMat = new THREE.MeshBasicMaterial({ color: wireColor });
-  const bulbGeo = new THREE.SphereGeometry(0.09, 10, 8);
-  const bulbs = [];
+  const pts = [];
   const lanternSlots = [];
-  let order = 0;
   for (const [ia, ib, sag] of spans) {
     const a = polePts[ia];
     const b = polePts[ib];
@@ -143,16 +143,33 @@ export function stringLights(group, polePts, spans, { drawPoles = true, poleColo
     const n = Math.max(6, Math.round(a.distanceTo(b) / spacing));
     for (let i = 1; i < n; i++) {
       const p = curve.getPointAt(i / n);
-      const mat = new THREE.MeshStandardMaterial({ color: 0x5a4a30, emissive: bulbColor, emissiveIntensity: 0.18 });
-      const bulb = new THREE.Mesh(bulbGeo, mat);
-      bulb.position.copy(p).add(new THREE.Vector3(0, -0.1, 0));
-      bulb.userData.order = order++;
-      group.add(bulb);
-      bulbs.push(bulb);
+      pts.push(p.clone().add(new THREE.Vector3(0, -0.1, 0)));
       // 짝수 전구 아래가 1순위 자리, 홀수 전구 아래는 자리가 찼을 때 쓰는 2순위 자리
       lanternSlots.push({ pos: p.clone().add(new THREE.Vector3(0, -0.55, 0)), tier: i % 2 });
     }
   }
+  // 전구 전부를 한 번에 그린다(휴대폰 부담을 줄이려고). 각 전구 밝기는 색으로 표현하고,
+  // 점등 코드가 쓰던 bulb.material.emissiveIntensity 를 그대로 쓸 수 있게 작은 대리 객체를 돌려준다.
+  const inst = new THREE.InstancedMesh(new THREE.SphereGeometry(0.09, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }), pts.length);
+  inst.frustumCulled = false;
+  const dim = new THREE.Color(0x3a2f20);
+  const glow = new THREE.Color(bulbColor);
+  const tmpC = new THREE.Color();
+  const m4 = new THREE.Matrix4();
+  const bulbs = pts.map((p, i) => {
+    m4.makeTranslation(p.x, p.y, p.z);
+    inst.setMatrixAt(i, m4);
+    let level = 0;
+    const setLevel = (v) => {
+      level = v;
+      tmpC.copy(glow).multiplyScalar(v * 0.85).add(dim);
+      inst.setColorAt(i, tmpC);
+      if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+    };
+    setLevel(0.18);
+    return { position: p, userData: { order: i }, material: { get emissiveIntensity() { return level; }, set emissiveIntensity(v) { setLevel(v); } } };
+  });
+  group.add(inst);
   return { bulbs, lanternSlots };
 }
 
@@ -178,24 +195,30 @@ export function windowTexture() {
 }
 
 // 불 켜진 건물들(도시 야경). arc로 일부 방향에만 둘 수 있다.
+// 건물마다 창문 무늬 위치를 다르게 하되, 텍스처 하나를 같이 쓰고 한 덩어리로 합쳐 한 번에 그린다.
 export function city(group, { count = 70, distMin = 34, distMax = 79, yBase = -18, hMax = 40, arc = [0, Math.PI * 2], color = 0x232846 } = {}) {
   const winTex = windowTexture();
+  winTex.wrapS = winTex.wrapT = THREE.RepeatWrapping;
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 1, emissive: 0xffffff, emissiveMap: winTex, emissiveIntensity: 0.9 });
+  const holder = new THREE.Group();
   for (let i = 0; i < count; i++) {
     const ang = arc[0] + (i / count) * (arc[1] - arc[0]) + Math.random() * 0.05;
     const dist = distMin + Math.random() * (distMax - distMin);
     const w = 4 + Math.random() * 6;
     const h = 6 + Math.random() * (dist > (distMin + distMax) / 2 ? hMax : hMax * 0.55);
     const d = 4 + Math.random() * 6;
-    const em = winTex.clone();
-    em.needsUpdate = true;
-    em.wrapS = em.wrapT = THREE.RepeatWrapping;
-    em.repeat.set(w / 4, h / 8);
-    em.offset.set(Math.random(), Math.random());
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color, roughness: 1, emissive: 0xffffff, emissiveMap: em, emissiveIntensity: 0.9 }));
+    const geo = new THREE.BoxGeometry(w, h, d);
+    // 창문 크기는 건물 크기에 맞추고(반복), 시작 위치는 건물마다 다르게(어긋남)
+    const uv = geo.attributes.uv;
+    const ox = Math.random();
+    const oy = Math.random();
+    for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) * (w / 4) + ox, uv.getY(k) * (h / 8) + oy);
+    const m = new THREE.Mesh(geo, mat);
     m.position.set(Math.cos(ang) * dist, h / 2 + yBase, Math.sin(ang) * dist);
     m.rotation.y = -ang;
-    group.add(m);
+    holder.add(m);
   }
+  group.add(mergeStatic(holder));
 }
 
 // 놀거리 표시: 바닥에서 은은하게 숨 쉬는 빛 고리

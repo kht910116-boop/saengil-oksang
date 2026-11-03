@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PAL, skyDome, stars, moon, cakeTable, decoBalloons, stringLights, city, finishWorld, spotMarker, puffs } from './common.js';
+import { PAL, skyDome, stars, moon, cakeTable, decoBalloons, stringLights, city, finishWorld, spotMarker, puffs, mergeStatic } from './common.js';
 import { sound } from '../audio.js';
 
 // 밤바다 크루즈: 달빛 아래 유람선 꼭대기 갑판. 배가 나아가며 양옆 도시 야경이 천천히 지나간다.
@@ -121,6 +121,8 @@ export function buildCruise(scene) {
   stripe.scale.set(1.025, 0.08, 1.012);
   stripe.position.y = -1.4;
   group.add(stripe);
+  // 난간·둥근 창·구명정처럼 움직이지 않는 장식은 deco에 모았다가 한 덩어리로 합친다
+  const deco = new THREE.Group();
   // 둥근 창
   const portMat = new THREE.MeshBasicMaterial({ color: 0xffd9a0 });
   for (let z = Z0 + 2; z < Z1; z += 2.2) {
@@ -128,7 +130,7 @@ export function buildCruise(scene) {
       const port = new THREE.Mesh(new THREE.CircleGeometry(0.24, 12), portMat);
       port.position.set(side * (X * 1.02 + 0.02), -2.6, z);
       port.rotation.y = side * Math.PI / 2;
-      group.add(port);
+      deco.add(port);
     }
   }
 
@@ -141,13 +143,13 @@ export function buildCruise(scene) {
       const r = new THREE.Mesh(new THREE.BoxGeometry(len, 0.06, 0.06), railMat);
       r.position.set((x1 + x2) / 2, h, (z1 + z2) / 2);
       r.rotation.y = -ang;
-      group.add(r);
+      deco.add(r);
     }
     const n = Math.max(2, Math.round(len / 1.8));
     for (let i = 0; i <= n; i++) {
       const p = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.1, 6), railMat);
       p.position.set(x1 + ((x2 - x1) * i) / n, 0.55, z1 + ((z2 - z1) * i) / n);
-      group.add(p);
+      deco.add(p);
     }
   };
   addRail(-X, Z0, -X, Z1);
@@ -166,12 +168,14 @@ export function buildCruise(scene) {
       const b = new THREE.Mesh(new THREE.CapsuleGeometry(0.7, 3.2, 4, 10), boatMat);
       b.rotation.x = Math.PI / 2;
       b.position.set(side * (X + 1.4), 1.6, z);
-      group.add(b);
+      deco.add(b);
       const davit = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.12, 0.12), railMat);
       davit.position.set(side * (X + 0.7), 2.5, z);
-      group.add(davit);
+      deco.add(davit);
     }
   }
+
+  group.add(mergeStatic(deco));
 
   const obstacles = [];
   const fx = puffs(group);

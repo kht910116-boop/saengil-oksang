@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { buildWorld } from './world.js';
 import { createAvatar } from './avatar.js';
 import { sound } from './audio.js';
@@ -94,7 +95,8 @@ function showGlFail(reason) {
 }
 let renderer;
 try {
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+  // 화면은 후처리(빛 번짐)를 거쳐 그려져서 기본 안티에일리어싱 버퍼는 쓰이지 않는다 → 끄면 휴대폰 메모리 절약
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
 } catch (e) {
   showGlFail(e.message);
   throw e; // 3D 없이는 파티장을 그릴 수 없어서 여기서 멈춘다
@@ -110,8 +112,11 @@ canvas.addEventListener('webglcontextlost', (e) => {
   }, 6000);
 });
 canvas.addEventListener('webglcontextrestored', () => { clearTimeout(glLostTimer); setStatus('화면을 되살렸어요', 2500); });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// 휴대폰(손가락 조작)은 1.5배까지만: 화면 점이 2배일 때보다 그릴 양이 약 44% 적고 눈으로는 차이가 거의 없다
+const IS_TOUCH = window.matchMedia?.('(pointer: coarse)').matches;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, IS_TOUCH ? 1.5 : 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.info.autoReset = false; // 한 화면(여러 단계 합계)의 그리기 횟수를 재려고 직접 초기화
 renderer.toneMappingExposure = 1.05;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 400);
@@ -205,22 +210,25 @@ function computeSlots() {
 }
 computeSlots();
 
+// 등불 모양은 한 번만 만들어 모든 등불이 같이 쓴다(종이+술 / 검은 뚜껑+끈 두 덩어리)
+const LANTERN_GEO = (() => {
+  const body = new THREE.CylinderGeometry(0.17, 0.17, 0.32, 14, 1, true);
+  const tassel = new THREE.ConeGeometry(0.035, 0.14, 6);
+  tassel.rotateX(Math.PI);
+  tassel.translate(0, -0.28, 0);
+  const capT = new THREE.CylinderGeometry(0.11, 0.13, 0.05, 12);
+  capT.translate(0, 0.18, 0);
+  const capB = new THREE.CylinderGeometry(0.11, 0.13, 0.05, 12);
+  capB.translate(0, -0.18, 0);
+  const cord = new THREE.CylinderGeometry(0.006, 0.006, 0.42, 4);
+  cord.translate(0, 0.4, 0);
+  return { paper: mergeGeometries([body, tassel]), dark: mergeGeometries([capT, capB, cord]) };
+})();
+const LANTERN_DARK = new THREE.MeshStandardMaterial({ color: 0x2a2238, roughness: 0.6 });
 function lanternMesh(hex) {
   const g = new THREE.Group();
   const paperMat = new THREE.MeshStandardMaterial({ color: hex, emissive: hex, emissiveIntensity: 0.55, roughness: 0.8, side: THREE.DoubleSide });
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.32, 14, 1, true), paperMat);
-  const ribs = new THREE.Mesh(new THREE.CylinderGeometry(0.175, 0.175, 0.32, 14, 4, true), new THREE.MeshBasicMaterial({ color: 0x2a2238, wireframe: true, transparent: true, opacity: 0.18 }));
-  const capMat = new THREE.MeshStandardMaterial({ color: 0x2a2238, roughness: 0.6 });
-  const capT = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 0.05, 12), capMat);
-  capT.position.y = 0.18;
-  const capB = capT.clone();
-  capB.position.y = -0.18;
-  const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.42, 4), new THREE.MeshBasicMaterial({ color: 0x1a1626 }));
-  cord.position.y = 0.4;
-  const tassel = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.14, 6), new THREE.MeshBasicMaterial({ color: hex }));
-  tassel.position.y = -0.28;
-  tassel.rotation.x = Math.PI;
-  g.add(body, ribs, capT, capB, cord, tassel);
+  g.add(new THREE.Mesh(LANTERN_GEO.paper, paperMat), new THREE.Mesh(LANTERN_GEO.dark, LANTERN_DARK));
   g.userData.paperMat = paperMat;
   return g;
 }
@@ -1200,6 +1208,8 @@ function addTopButton(id, label, svg, onClick) {
   btn.id = id;
   btn.className = 'icon-btn';
   btn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${svg}</svg><span>${label}</span>`;
+  btn.setAttribute('aria-label', label);
+  btn.title = label;
   document.querySelector('.top-right').appendChild(btn);
   btn.addEventListener('click', onClick);
   return btn;
@@ -2626,9 +2636,21 @@ function frame() {
   }
   camera.lookAt(camLook);
 
+  // 사람이 많으면 이름표가 화면을 덮으므로: 가까운 12명 + 나 + 주인공만 이름표를 보인다
+  let labelSet = null;
+  if (people.length > 14) {
+    labelSet = new Set(people
+      .map((p) => [p, p.av.root.position.distanceToSquared(camera.position)])
+      .sort((x, y) => x[1] - y[1])
+      .slice(0, 12)
+      .map((x) => x[0]));
+  }
   for (const p of people) {
     p.av.update(dt, p.speed, camera, p.dirX);
-    placeLabel(p.label, p.av.root.position, p.av.labelY);
+    const far = p.av.root.position.distanceTo(camera.position) > 22;
+    const show = p.isMe || p.isOwner || (!far && (!labelSet || labelSet.has(p)));
+    if (show) placeLabel(p.label, p.av.root.position, p.av.labelY);
+    else p.label.style.display = 'none';
   }
 
   for (const l of lanterns) {
@@ -2665,6 +2687,7 @@ function frame() {
   breath.update(dt);
   meteors.update(dt, camera);
   updateFloats(dt);
+  renderer.info.reset();
   composer.render();
   if (photoPending) {
     // 3D 화면은 그린 직후에만 베낄 수 있다
@@ -2698,6 +2721,17 @@ window.__lantern = {
   goSpot(id) { const h = (world.hotspots || []).find((x) => x.id === id); if (h && me) { me.av.root.position.set(h.pos.x, 0, h.pos.z + 0.3); me.target = null; } },
   get lift() { return me ? me.av.lift : 0; },
   emote(kind) { sendEmote(kind); },
+  // 시험용: 사람·등불을 한꺼번에 늘려 꽉 찬 파티장을 흉내 낸다
+  crowd(n = 33, nl = 44) {
+    const outfits = ['dress', 'suit', 'party'];
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 3 + Math.random() * 8;
+      addPerson({ name: `친구${i + 1}`, color: [0xf29bb3, 0x8fd3c1, 0xb9a6f2, 0xffc46b][i % 4], hatColor: HAT_COLORS[i % 4], outfit: outfits[i % 3] }, new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r), { npc: true });
+    }
+    for (let i = 0; i < nl; i++) hangLantern({ name: '친구', msg: '생일 축하해', color: [0xf29bb3, 0x8fd3c1, 0xb9a6f2, 0xffc46b][i % 4] });
+  },
+  get perf() { const i = renderer.info; return { calls: i.render.calls, tris: i.render.triangles, geos: i.memory.geometries, tex: i.memory.textures, programs: i.programs?.length || 0, people: people.length, lanterns: lanterns.length, pr: renderer.getPixelRatio(), level: perf.level }; },
   // 미리보기 이미지(카카오톡·SNS) 촬영용: 불이 켜진 장면을 정해진 각도에서
   ogPose() { ogPose = true; setLitInstantly(); for (const b of world.bulbs) b.material.emissiveIntensity = 2.6; },
   get mode() { return MODE; },

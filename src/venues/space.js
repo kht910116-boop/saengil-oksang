@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PAL, stars, cakeTable, decoBalloons, stringLights, finishWorld, spotMarker, puffs, softDot } from './common.js';
+import { PAL, stars, cakeTable, decoBalloons, stringLights, finishWorld, spotMarker, puffs, softDot, mergeStatic } from './common.js';
 import { sound } from '../audio.js';
 
 // 우주 전망 라운지: 지구가 내려다보이는 우주정거장 라운지
@@ -166,6 +166,7 @@ export function buildSpace(scene) {
   const glassMat = new THREE.MeshStandardMaterial({ color: 0x9fdcff, transparent: true, opacity: 0.12, roughness: 0.05, metalness: 0.3, side: THREE.DoubleSide, depthWrite: false });
   const hx = W / 2;
   const hz = D / 2;
+  const glassG = new THREE.Group();
   for (const [len, x, z, alongX] of [[DW, 0, ZF, true], [DD, -PX, DZ, false], [DD, PX, DZ, false], [PX - 1.6, -(PX + 1.6) / 2, ZB, true], [PX - 1.6, (PX + 1.6) / 2, ZB, true]]) {
     const pane = new THREE.Mesh(new THREE.PlaneGeometry(len, 1.1), glassMat);
     pane.position.set(x, 0.55, z);
@@ -174,8 +175,9 @@ export function buildSpace(scene) {
     strip.position.set(x, 1.12, z);
     const strip2 = strip.clone();
     strip2.position.y = 0.03;
-    group.add(pane, strip, strip2);
+    glassG.add(pane, strip, strip2);
   }
+  group.add(mergeStatic(glassG));
 
   // 머리 위 트러스 뼈대(전구 줄을 거는 기둥 겸용)
   const trussMat = new THREE.MeshStandardMaterial({ color: 0xc9d0de, roughness: 0.4, metalness: 0.7 });
