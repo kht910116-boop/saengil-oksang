@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { PAL, stars, cakeTable, decoBalloons, stringLights, finishWorld } from './common.js';
+import { PAL, stars, cakeTable, decoBalloons, stringLights, finishWorld, spotMarker, puffs, softDot } from './common.js';
+import { sound } from '../audio.js';
 
 // 우주 전망 라운지: 지구가 내려다보이는 우주정거장 라운지
 function panelTexture(w, d) {
@@ -147,18 +148,25 @@ export function buildSpace(scene) {
   group.add(sunGlow);
 
   // 금속 바닥과 받침
-  const floor = new THREE.Mesh(new THREE.BoxGeometry(W, 0.6, D), new THREE.MeshStandardMaterial({ map: panelTexture(W, D), roughness: 0.5, metalness: 0.55 }));
-  floor.position.y = -0.3;
+  // 넓은 전망 갑판: 가운데 라운지(케이크), 앞쪽 큰 창과 망원경, 왼쪽 무중력 구역, 오른쪽 순간이동 패드
+  const PX = 20;
+  const ZF = -26;
+  const ZB = 12;
+  const DW = PX * 2;
+  const DD = ZB - ZF;
+  const DZ = (ZB + ZF) / 2;
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(DW, 0.6, DD), new THREE.MeshStandardMaterial({ map: panelTexture(DW, DD), roughness: 0.5, metalness: 0.55 }));
+  floor.position.set(0, -0.3, DZ);
   group.add(floor);
-  const under = new THREE.Mesh(new THREE.BoxGeometry(W + 1, 2.5, D + 1), new THREE.MeshStandardMaterial({ color: 0x2a3042, roughness: 0.6, metalness: 0.6 }));
-  under.position.y = -1.9;
+  const under = new THREE.Mesh(new THREE.BoxGeometry(DW + 1, 2.5, DD + 1), new THREE.MeshStandardMaterial({ color: 0x2a3042, roughness: 0.6, metalness: 0.6 }));
+  under.position.set(0, -1.9, DZ);
   group.add(under);
   // 가장자리 유리 난간 + 빛나는 띠
   const edgeMat = new THREE.MeshBasicMaterial({ color: 0x6fe3ff });
   const glassMat = new THREE.MeshStandardMaterial({ color: 0x9fdcff, transparent: true, opacity: 0.12, roughness: 0.05, metalness: 0.3, side: THREE.DoubleSide, depthWrite: false });
   const hx = W / 2;
   const hz = D / 2;
-  for (const [len, x, z, alongX] of [[W, 0, -hz, true], [D, -hx, 0, false], [D, hx, 0, false], [hx - 1.6, -(hx + 1.6) / 2, hz, true], [hx - 1.6, (hx + 1.6) / 2, hz, true]]) {
+  for (const [len, x, z, alongX] of [[DW, 0, ZF, true], [DD, -PX, DZ, false], [DD, PX, DZ, false], [PX - 1.6, -(PX + 1.6) / 2, ZB, true], [PX - 1.6, (PX + 1.6) / 2, ZB, true]]) {
     const pane = new THREE.Mesh(new THREE.PlaneGeometry(len, 1.1), glassMat);
     pane.position.set(x, 0.55, z);
     if (!alongX) pane.rotation.y = Math.PI / 2;
@@ -197,11 +205,11 @@ export function buildSpace(scene) {
   const panelMat = new THREE.MeshStandardMaterial({ color: 0x1b2f6a, emissive: 0x0a1840, roughness: 0.3, metalness: 0.8 });
   for (const side of [-1, 1]) {
     const arm = new THREE.Mesh(new THREE.BoxGeometry(18, 0.3, 0.3), trussMat);
-    arm.position.set(side * (hx + 9), -1.5, -2);
+    arm.position.set(side * (PX + 9), -1.5, -8);
     group.add(arm);
     for (let k = 0; k < 3; k++) {
       const p = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.1, 7), panelMat);
-      p.position.set(side * (hx + 4 + k * 5.2), -1.5, -2);
+      p.position.set(side * (PX + 4 + k * 5.2), -1.5, -8);
       p.rotation.x = 0.4;
       group.add(p);
     }
@@ -222,9 +230,80 @@ export function buildSpace(scene) {
   const tri = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.1, 3, 1, true), new THREE.MeshStandardMaterial({ color: 0x3a4258, wireframe: true }));
   tri.position.y = 0.55;
   scope.add(tube, tri);
-  scope.position.set(hx - 2, 0, -hz + 2);
+  scope.position.set(0, 0, ZF + 2.2);
   group.add(scope);
-  obstacles.push({ x: hx - 2, z: -hz + 2, r: 0.8 });
+  obstacles.push({ x: 0, z: ZF + 2.2, r: 0.8 });
+
+  // ── 놀거리 ──
+  const glowFx = puffs(group, { color: '140,220,255', additive: true });
+  // 무중력 구역: 빛나는 원통 안에서는 몸이 둥둥 뜬다
+  const ZG = new THREE.Vector3(-13, 0, -14);
+  const zgR = 4.5;
+  const zgCyl = new THREE.Mesh(new THREE.CylinderGeometry(zgR, zgR, 7, 40, 1, true), new THREE.MeshBasicMaterial({ color: 0x7ad7ff, transparent: true, opacity: 0.08, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+  zgCyl.position.set(ZG.x, 3.5, ZG.z);
+  const zgRing = new THREE.Mesh(new THREE.TorusGeometry(zgR, 0.07, 8, 64), edgeMat);
+  zgRing.rotation.x = Math.PI / 2;
+  zgRing.position.set(ZG.x, 0.05, ZG.z);
+  const zgRing2 = zgRing.clone();
+  zgRing2.position.y = 7;
+  group.add(zgCyl, zgRing, zgRing2);
+  const zgN = 60;
+  const zgGeo = new THREE.BufferGeometry();
+  const zgPos = new Float32Array(zgN * 3);
+  for (let i = 0; i < zgN; i++) { const a = Math.random() * 6.28; const r = Math.random() * zgR; zgPos.set([ZG.x + Math.cos(a) * r, Math.random() * 7, ZG.z + Math.sin(a) * r], i * 3); }
+  zgGeo.setAttribute('position', new THREE.BufferAttribute(zgPos, 3));
+  const zgDots = new THREE.Points(zgGeo, new THREE.PointsMaterial({ map: softDot('170,230,255'), size: 0.25, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+  group.add(zgDots);
+  // 순간이동 패드 두 개
+  const padA = new THREE.Vector3(15, 0, 6);
+  const padB = new THREE.Vector3(15, 0, -20);
+  const pads = [padA, padB].map((p) => {
+    const g = new THREE.Group();
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.4, 0.15, 32), new THREE.MeshStandardMaterial({ color: 0x3a4258, metalness: 0.7, roughness: 0.3 }));
+    base.position.y = 0.075;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.06, 8, 40), new THREE.MeshBasicMaterial({ color: 0xb48cff }));
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.18;
+    const beamC = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 3, 32, 1, true), new THREE.MeshBasicMaterial({ color: 0xb48cff, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+    beamC.position.y = 1.5;
+    g.add(base, ring, beamC);
+    g.position.copy(p);
+    group.add(g);
+    return { g, ring, beamC, flash: 0 };
+  });
+  const flashPad = (i) => { pads[i].flash = 1; glowFx.emit(new THREE.Vector3(pads[i].g.position.x, 0.6, pads[i].g.position.z), { n: 16, spread: 1.4, up: 2.4, size: 0.25, grow: 0.5, life: 1.2 }); };
+  const teleport = (from, to) => ({ person, isMe }) => {
+    sound.teleport();
+    flashPad(from);
+    flashPad(to);
+    if (person) {
+      const dst = pads[to].g.position;
+      person.av.root.position.set(dst.x - 2.2, 0, dst.z);
+      person.target = null;
+      if (person.net && !isMe) person.net.copy(person.av.root.position);
+    }
+    return { status: '쀼웅! 순간이동했어요' };
+  };
+  const hotspots = [
+    {
+      id: 'zerog', label: '무중력 구역', verb: '무중력 구역 가운데로', cool: 2000, pos: new THREE.Vector3(ZG.x + zgR + 1.2, 0, ZG.z), r: 2.2,
+      run({ person }) {
+        if (person) { person.target = ZG.clone(); }
+        return { status: '둥실~ 몸이 떠올라요' };
+      },
+    },
+    { id: 'tpA', label: '순간이동', verb: '저쪽 패드로 순간이동', shared: true, cool: 2500, pos: padA.clone(), r: 1.6, run: teleport(0, 1) },
+    { id: 'tpB', label: '순간이동', verb: '저쪽 패드로 순간이동', shared: true, cool: 2500, pos: padB.clone(), r: 1.6, run: teleport(1, 0) },
+    {
+      id: 'scope', label: '지구 망원경', verb: '망원경으로 지구 보기', cool: 6000, pos: new THREE.Vector3(0, 0, ZF + 3.6),
+      run({ isMe }) {
+        if (!isMe) return {};
+        const target = earth.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(10, 60, 40));
+        return { view: { pos: new THREE.Vector3(0, 2.4, ZF + 1.2), look: target, fov: 22, ms: 5500 }, status: '우리가 사는 지구가 보여요' };
+      },
+    },
+  ];
+  for (const hs of hotspots) hs.marker = hs.id === 'scope' ? spotMarker(group, hs.pos, 0x7ad7ff) : null;
 
   const cake = cakeTable(group, { legColor: 0xc9d0de, topColor: 0xeaf0ff });
   obstacles.push(cake.obstacle);
@@ -251,8 +330,11 @@ export function buildSpace(scene) {
     balloons,
     ...cake,
     ...lights,
-    bounds: { w: W - 1.2, d: D - 1.2 },
-    entrance: new THREE.Vector3(0, 0, hz - 1.2),
+    bounds: { minX: -PX + 0.6, maxX: PX - 0.6, minZ: ZF + 0.6, maxZ: ZB - 0.6 },
+    hotspots,
+    roam: 16,
+    zones: [{ kind: 'float', test: (p) => (p.x - ZG.x) ** 2 + (p.z - ZG.z) ** 2 < zgR * zgR }],
+    entrance: new THREE.Vector3(0, 0, ZB - 1.2),
     cakeTop: new THREE.Vector3(0, 1.9, 0),
     hemiBase: 0.85,
     palette: { ...PAL, sky: 0x03040c },
@@ -263,6 +345,17 @@ export function buildSpace(scene) {
       sat.position.set(Math.cos(a) * 70, 25 + Math.sin(a * 2) * 6, Math.sin(a) * 70 - 30);
       sat.rotation.y = -a;
       blink.visible = Math.sin(t * 5) > 0.6;
+      const zp = zgGeo.attributes.position.array;
+      for (let i = 0; i < zgN; i++) { zp[i * 3 + 1] += dt * (0.3 + (i % 4) * 0.1); if (zp[i * 3 + 1] > 7) zp[i * 3 + 1] = 0; }
+      zgGeo.attributes.position.needsUpdate = true;
+      zgCyl.material.opacity = 0.07 + Math.sin(t * 1.5) * 0.03;
+      for (const pd of pads) {
+        pd.flash = Math.max(0, pd.flash - dt * 1.4);
+        pd.beamC.material.opacity = pd.flash * 0.5;
+        pd.ring.rotation.z = t * 1.5;
+        pd.ring.material.color.setHSL(0.75 + Math.sin(t * 2) * 0.05, 0.9, 0.65 + pd.flash * 0.3);
+      }
+      glowFx.tick(dt);
     },
   });
 }

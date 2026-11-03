@@ -448,6 +448,58 @@ export const sound = {
     const t = ctx.currentTime;
     [1046.5, 880, 784, 659.3, 587.3, 523.3].forEach((f, i) => bell(f, t + i * 0.42, 0.06));
   },
+  // ── 장소 놀거리 소리 ──
+  shipHorn() { // 뱃고동 '뿌우우~'
+    if (!on) return;
+    const t = ctx.currentTime;
+    for (const [f, g] of [[87.3, 0.05], [130.8, 0.04], [174.6, 0.02]]) {
+      const o = ctx.createOscillator();
+      const gn = ctx.createGain();
+      const lp = ctx.createBiquadFilter();
+      o.type = 'sawtooth';
+      o.frequency.value = f;
+      lp.type = 'lowpass';
+      lp.frequency.value = 600;
+      gn.gain.setValueAtTime(0, t);
+      gn.gain.linearRampToValueAtTime(g * 2.2, t + 0.25);
+      gn.gain.setValueAtTime(g * 2.2, t + 2.2);
+      gn.gain.exponentialRampToValueAtTime(0.0001, t + 3.2);
+      o.connect(lp).connect(gn).connect(master);
+      o.start(t);
+      o.stop(t + 3.3);
+    }
+  },
+  creak() { // 조타륜 끼익
+    if (!on) return;
+    const t = ctx.currentTime;
+    for (let i = 0; i < 5; i++) tone(180 + Math.random() * 60, t + i * 0.18, 0.15, { type: 'sawtooth', gain: 0.02, to: 120, glide: 0.12 });
+  },
+  bigBell() { // 소원의 종 '댕~'
+    if (!on) return;
+    const t = ctx.currentTime;
+    [[392, 0.16], [392 * 2.4, 0.05], [392 * 3, 0.04], [196, 0.1]].forEach(([f, g]) => tone(f, t, 4, { type: 'sine', gain: g }));
+    noiseBurst(t, 0.05, 0.08, 2000);
+  },
+  shimmer() { // 반짝이는 소리(오로라·눈사람 완성)
+    if (!on) return;
+    const t = ctx.currentTime;
+    [1318.5, 1568, 1975.5, 2349.3, 2637, 3136].forEach((f, i) => tone(f, t + i * 0.07, 1.2, { type: 'sine', gain: 0.03 }));
+  },
+  teleport() { // 순간이동 '쀼웅'
+    if (!on) return;
+    const t = ctx.currentTime;
+    tone(300, t, 0.5, { type: 'sine', gain: 0.1, to: 2400, glide: 0.4 });
+    tone(2400, t + 0.42, 0.4, { type: 'triangle', gain: 0.04, to: 600, glide: 0.3 });
+    sweep(t, 0.6, 0.05, 500, 6000, 'bandpass', true, 3);
+  },
+  boing() { // 트램펄린·눈 뭉치기 '통'
+    if (!on) return;
+    tone(220, ctx.currentTime, 0.3, { type: 'sine', gain: 0.12, to: 520, glide: 0.2 });
+  },
+  burner() { // 열기구 버너 '화르르'
+    if (!on) return;
+    sweep(ctx.currentTime, 1.4, 0.12, 250, 900, 'lowpass', false, 0.8);
+  },
   // 장소 바꾸기 '휙'
   whoosh() {
     if (!on) return;

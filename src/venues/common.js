@@ -198,6 +198,85 @@ export function city(group, { count = 70, distMin = 34, distMax = 79, yBase = -1
   }
 }
 
+// 놀거리 표시: 바닥에서 은은하게 숨 쉬는 빛 고리
+export function spotMarker(group, pos, color = 0xffc46b) {
+  const m = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.75, 40), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(pos.x, (pos.floorY || 0) + 0.03, pos.z);
+  group.add(m);
+  return m;
+}
+
+// 부드러운 점 텍스처(김·연기·반짝이용)
+export function softDot(rgba = '255,255,255') {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, `rgba(${rgba},0.95)`);
+  grad.addColorStop(0.5, `rgba(${rgba},0.35)`);
+  grad.addColorStop(1, `rgba(${rgba},0)`);
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+}
+
+// 퍼지며 사라지는 점들(뱃고동 김, 순간이동 빛, 눈 가루 등). 장소 update에서 tick(dt)을 불러야 움직인다.
+export function puffs(group, { color = '235,235,245', additive = false } = {}) {
+  const tex = softDot(color);
+  const list = [];
+  return {
+    emit(pos, { n = 8, spread = 0.3, up = 1.2, size = 0.4, grow = 1.6, life = 2.2, vel = null } = {}) {
+      for (let i = 0; i < n; i++) {
+        const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending }));
+        m.position.set(pos.x + (Math.random() - 0.5) * spread, pos.y + (Math.random() - 0.5) * spread, pos.z + (Math.random() - 0.5) * spread);
+        m.scale.setScalar(size);
+        const v = vel ? vel.clone() : new THREE.Vector3((Math.random() - 0.5) * 0.6, up * (0.7 + Math.random() * 0.6), (Math.random() - 0.5) * 0.6);
+        if (vel) v.add(new THREE.Vector3((Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8));
+        m.userData = { v, age: -i * 0.05, life: life * (0.8 + Math.random() * 0.4), size, grow };
+        group.add(m);
+        list.push(m);
+      }
+    },
+    tick(dt) {
+      for (let i = list.length - 1; i >= 0; i--) {
+        const m = list[i];
+        const u = m.userData;
+        u.age += dt;
+        if (u.age < 0) continue;
+        const k = u.age / u.life;
+        m.position.addScaledVector(u.v, dt);
+        u.v.multiplyScalar(1 - dt * 0.6);
+        m.scale.setScalar(u.size * (1 + k * u.grow));
+        m.material.opacity = Math.min(1, u.age * 5) * (1 - k) * 0.8;
+        if (k >= 1) { group.remove(m); m.material.dispose(); list.splice(i, 1); }
+      }
+    },
+  };
+}
+
+// 글씨 판(네온 간판 등)
+export function textPlane(text, { w = 4, h = 1, color = '#ff7ab8', font = 'Jua', glow = 18 } = {}) {
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = Math.round(1024 * (h / w));
+  const g = c.getContext('2d');
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.font = `${Math.round(c.height * 0.62)}px ${font}, sans-serif`;
+  g.shadowColor = color;
+  g.shadowBlur = glow;
+  g.fillStyle = '#fff';
+  for (let i = 0; i < 2; i++) g.fillText(text, c.width / 2, c.height / 2);
+  g.shadowBlur = 0;
+  g.fillStyle = color;
+  g.globalAlpha = 0.35;
+  g.fillText(text, c.width / 2, c.height / 2);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+}
+
 // 촛불 연기: 부드러운 회색 점이 꼬불꼬불 올라가며 퍼진다
 function smokeTexture() {
   const c = document.createElement('canvas');
@@ -214,7 +293,7 @@ function smokeTexture() {
 
 // 장소 하나를 완성한다: 공통 동작(촛불, 풍선 흔들림)과 장소별 움직임, 정리 함수를 붙인다
 export function finishWorld(scene, group, parts) {
-  const { flames, candleLight, balloons = [], extraUpdate } = parts;
+  const { flames, candleLight, balloons = [], extraUpdate, zones = [], hotspots = [] } = parts;
   let state = 'lit'; // lit → blowing → out
   let bt = 0; // 끄기 시작한 뒤 흐른 시간
   let blowDir = new THREE.Vector3(0, 0, -1); // 입김이 부는 방향(촛불이 이쪽으로 눕는다)
@@ -261,7 +340,9 @@ export function finishWorld(scene, group, parts) {
       if (from) blowDir = tmpV.set(-from.x, 0, -from.z).normalize().clone();
     },
     get candleState() { return state; },
-    update(t, dt = 0.016) {
+    // 이 위치가 속한 구역(미끄럼·무중력·트램펄린·댄스)
+    zoneAt(pos) { for (const z of zones) if (z.test(pos)) return z; return null; },
+    update(t, dt = 0.016, ctx = {}) {
       if (state === 'lit') {
         for (const f of flames) {
           f.rotation.set(0, 0, 0);
@@ -302,7 +383,8 @@ export function finishWorld(scene, group, parts) {
         b.position.y = b.userData.base.y + Math.sin(t * 1.1 + ph) * 0.12;
         b.rotation.z = Math.sin(t * 0.8 + ph) * 0.06;
       }
-      extraUpdate?.(t, dt);
+      for (const hs of hotspots) if (hs.marker) { hs.marker.material.opacity = 0.3 + Math.sin(t * 2.5 + hs.pos.x) * 0.18; hs.marker.scale.setScalar(1 + Math.sin(t * 2.5 + hs.pos.x) * 0.06); }
+      extraUpdate?.(t, dt, ctx);
     },
     dispose() {
       scene.remove(group);

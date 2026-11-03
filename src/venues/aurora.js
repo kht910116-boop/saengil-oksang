@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { PAL, skyDome, stars, cakeTable, decoBalloons, stringLights, finishWorld } from './common.js';
+import { PAL, skyDome, stars, cakeTable, decoBalloons, stringLights, finishWorld, spotMarker, puffs } from './common.js';
+import { sound } from '../audio.js';
 
 // 오로라 유리돔: 눈 덮인 설원 한가운데 투명한 유리 돔. 점등 때 오로라가 하늘을 덮는다.
 const AURORA_VERT = `
@@ -65,11 +66,11 @@ function woodRingTexture() {
   // 가운데 둥근 러그
   g.fillStyle = '#9b3c4f';
   g.beginPath();
-  g.arc(256, 256, 120, 0, Math.PI * 2);
+  g.arc(256, 256, 64, 0, Math.PI * 2);
   g.fill();
   g.strokeStyle = '#f2d39a';
-  g.lineWidth = 6;
-  for (const r of [112, 96]) {
+  g.lineWidth = 4;
+  for (const r of [59, 50]) {
     g.beginPath();
     g.arc(256, 256, r, 0, Math.PI * 2);
     g.stroke();
@@ -102,7 +103,7 @@ function pine(scale, color = 0x1f4a44, snow = true) {
 }
 
 export function buildAurora(scene) {
-  const R = 12.5;
+  const R = 24; // 큰 유리 돔: 가운데 파티 구역, 뒤쪽 스케이트장, 왼쪽 벽난로, 오른쪽 눈사람·오로라 수정
   const group = new THREE.Group();
   scene.background = new THREE.Color(0x0a1830);
   scene.fog = new THREE.FogExp2(0x16304a, 0.006);
@@ -159,7 +160,7 @@ export function buildAurora(scene) {
   const obstacles = [];
   // 실내 소품: 장식 트리, 소파 두 개, 벽난로
   const tree = pine(1.2, 0x2d6b55, false);
-  tree.position.set(-7.5, 0, -5.5);
+  tree.position.set(-9, 0, -6);
   group.add(tree);
   const ornCols = [0xff6b6b, 0xffd166, 0x7bdff2, 0xf29bb3];
   for (let i = 0; i < 18; i++) {
@@ -172,7 +173,7 @@ export function buildAurora(scene) {
   }
   obstacles.push({ x: tree.position.x, z: tree.position.z, r: 1.8 });
   const sofaMat = new THREE.MeshStandardMaterial({ color: 0xe8dcc6, roughness: 0.9 });
-  for (const [x, z, ry] of [[7.2, -4.5, -0.9], [7.6, 4.2, -2.2]]) {
+  for (const [x, z, ry] of [[-15.5, 3, 1.4], [-15.5, 9.5, 1.8]]) {
     const s = new THREE.Group();
     const seat = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.5, 1), sofaMat);
     seat.position.y = 0.35;
@@ -193,7 +194,7 @@ export function buildAurora(scene) {
   const fireLight = new THREE.PointLight(0xff8a3a, 2.4, 8, 1.6);
   fireLight.position.y = 1.2;
   fire.add(stone, embers, fireLight);
-  fire.position.set(-6.5, 0, 6);
+  fire.position.set(-12, 0, 6);
   group.add(fire);
   obstacles.push({ x: fire.position.x, z: fire.position.z, r: 1.3 });
 
@@ -202,7 +203,7 @@ export function buildAurora(scene) {
   const balloons = decoBalloons(group, undefined, [0x9fd8ff, PAL.mint, 0xffffff, PAL.lavender, 0x9fd8ff]);
 
   // 돔 안쪽 고리에 매단 전구 줄 + 꼭대기 중심에서 내려오는 줄
-  const ringR = 11.2;
+  const ringR = 10.5;
   const ringY = 4.4;
   const ring = [];
   for (let i = 0; i < 10; i++) {
@@ -213,12 +214,16 @@ export function buildAurora(scene) {
   const hub = pts.length - 1;
   const spans = ring.map((_, i) => [i, (i + 1) % ring.length, 0.6]);
   for (let i = 0; i < ring.length; i += 2) spans.push([hub, i, 1.0]);
-  const lights = stringLights(group, pts, spans, { drawPoles: false, wireColor: 0x3a4660 });
+  const lights = stringLights(group, pts, spans, { drawPoles: true, poleColor: 0xd8dde8, wireColor: 0x3a4660 });
+  // 가운데 고리는 돔 꼭대기에서 내려온 줄에 매단다
+  const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, R - 8.2, 4), new THREE.MeshBasicMaterial({ color: 0x3a4660 }));
+  cable.position.y = 8.2 + (R - 8.2) / 2;
+  group.add(cable);
 
   // 바깥: 눈 덮인 소나무 숲과 먼 산
   for (let i = 0; i < 70; i++) {
     const a = Math.random() * Math.PI * 2;
-    const d = 22 + Math.random() * 70;
+    const d = R + 6 + Math.random() * 70;
     const p = pine(1 + Math.random() * 1.6);
     p.position.set(Math.cos(a) * d, -0.6, Math.sin(a) * d);
     p.rotation.y = Math.random() * 6;
@@ -275,7 +280,7 @@ export function buildAurora(scene) {
   for (let i = 0; i < SNOW; i++) {
     let x;
     let z;
-    do { x = (Math.random() - 0.5) * 120; z = (Math.random() - 0.5) * 120; } while (x * x + z * z < (R + 1) * (R + 1));
+    do { x = (Math.random() - 0.5) * 160; z = (Math.random() - 0.5) * 160; } while (x * x + z * z < (R + 1) * (R + 1));
     sp[i * 3] = x;
     sp[i * 3 + 1] = Math.random() * 40;
     sp[i * 3 + 2] = z;
@@ -285,6 +290,131 @@ export function buildAurora(scene) {
   const snow = new THREE.Points(snowGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.18, transparent: true, opacity: 0.85, depthWrite: false }));
   snow.frustumCulled = false;
   group.add(snow);
+
+  // ── 놀거리 ──
+  const fx = puffs(group, { color: '255,255,255' });
+  const ember = puffs(group, { color: '255,170,80', additive: true });
+  // 스케이트장(뒤쪽): 위에서는 미끄러진다
+  const RINK = new THREE.Vector3(0, 0, -14);
+  const rinkR = 6.5;
+  const iceTex = (() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 256;
+    const g = c.getContext('2d');
+    g.fillStyle = '#cfe8ff';
+    g.fillRect(0, 0, 256, 256);
+    g.strokeStyle = 'rgba(255,255,255,0.55)';
+    for (let i = 0; i < 40; i++) {
+      g.lineWidth = 0.5 + Math.random();
+      g.beginPath();
+      const x = Math.random() * 256;
+      const y = Math.random() * 256;
+      g.arc(x, y, 20 + Math.random() * 80, Math.random() * 6, Math.random() * 6);
+      g.stroke();
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  })();
+  const ice = new THREE.Mesh(new THREE.CircleGeometry(rinkR, 48), new THREE.MeshStandardMaterial({ map: iceTex, roughness: 0.05, metalness: 0.2, emissive: 0x1a3a5a, emissiveIntensity: 0.3 }));
+  ice.rotation.x = -Math.PI / 2;
+  ice.position.set(RINK.x, 0.015, RINK.z);
+  group.add(ice);
+  const rinkEdge = new THREE.Mesh(new THREE.TorusGeometry(rinkR, 0.08, 6, 64), new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x6fb8ff, emissiveIntensity: 0.6 }));
+  rinkEdge.rotation.x = Math.PI / 2;
+  rinkEdge.position.set(RINK.x, 0.1, RINK.z);
+  group.add(rinkEdge);
+  // 눈사람(함께 만들기): 누를 때마다 한 단계씩
+  const snowman = new THREE.Group();
+  const snowMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
+  const coal = new THREE.MeshStandardMaterial({ color: 0x222222 });
+  const parts = [
+    (() => { const m = new THREE.Mesh(new THREE.SphereGeometry(0.9, 20, 16), snowMat); m.position.y = 0.8; return m; })(),
+    (() => { const m = new THREE.Mesh(new THREE.SphereGeometry(0.65, 20, 16), snowMat); m.position.y = 2.0; return m; })(),
+    (() => { const m = new THREE.Mesh(new THREE.SphereGeometry(0.45, 20, 16), snowMat); m.position.y = 2.95; return m; })(),
+    (() => {
+      const g = new THREE.Group();
+      for (const x of [-0.15, 0.15]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), coal); e.position.set(x, 3.05, 0.4); g.add(e); }
+      const nose = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.4, 10), new THREE.MeshStandardMaterial({ color: 0xff8a3c }));
+      nose.rotation.x = Math.PI / 2;
+      nose.position.set(0, 2.95, 0.6);
+      const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.1, 8, 20), new THREE.MeshStandardMaterial({ color: 0xd94a5a }));
+      scarf.rotation.x = Math.PI / 2;
+      scarf.position.y = 2.55;
+      const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.45, 16), coal);
+      hat.position.y = 3.5;
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.48, 0.05, 16), coal);
+      brim.position.y = 3.3;
+      g.add(nose, scarf, hat, brim);
+      return g;
+    })(),
+  ];
+  for (const m of parts) { m.visible = false; snowman.add(m); }
+  const snowPile = new THREE.Mesh(new THREE.SphereGeometry(1.2, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), snowMat);
+  snowman.add(snowPile);
+  snowman.position.set(14, 0, 4);
+  snowman.rotation.y = -0.9;
+  group.add(snowman);
+  obstacles.push({ x: 14, z: 4, r: 1.3 });
+  let snowStage = 0;
+  let snowWave = 0;
+  // 오로라 수정: 누르면 오로라 색이 바뀌며 크게 일렁인다
+  const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.8, 0), new THREE.MeshStandardMaterial({ color: 0x9fffd8, emissive: 0x2bff9a, emissiveIntensity: 0.8, roughness: 0.1, transparent: true, opacity: 0.9 }));
+  crystal.scale.y = 1.8;
+  crystal.position.set(14, 1.9, -9);
+  const plinth = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.9, 0.6, 8), new THREE.MeshStandardMaterial({ color: 0xc8d6ee, roughness: 0.6 }));
+  plinth.position.set(14, 0.3, -9);
+  group.add(crystal, plinth);
+  obstacles.push({ x: 14, z: -9, r: 1.0 });
+  const palettes = [[0x2bff9a, 0x7a5cff], [0xff5ca8, 0x7ad7ff], [0xffd166, 0xff6b6b], [0x9b7bff, 0x4dffc3]];
+  let palIdx = 0;
+  let pulse = 0;
+  let flare = 0;
+  const hotspots = [
+    {
+      id: 'snowman', label: '눈사람', verb: '눈 굴려서 보태기', shared: true, cool: 1500,
+      pos: new THREE.Vector3(12.4, 0, 5.4),
+      run() {
+        sound.boing();
+        fx.emit(new THREE.Vector3(14, 1, 4), { n: 10, spread: 0.8, up: 1.4, size: 0.25, grow: 1, life: 1.2 });
+        if (snowStage < parts.length) {
+          parts[snowStage].visible = true;
+          snowStage++;
+          if (snowStage === parts.length) { sound.shimmer(); snowWave = 2; return { status: '눈사람이 완성됐어요!' }; }
+          return { status: `눈사람 만드는 중 (${snowStage}/${parts.length})` };
+        }
+        snowWave = 2; // 다 만든 뒤에는 눈사람이 들썩
+        return {};
+      },
+    },
+    {
+      id: 'fire', label: '벽난로', verb: '장작 넣기', shared: true, cool: 3000,
+      pos: new THREE.Vector3(-10.4, 0, 6),
+      run() {
+        sound.crackle();
+        flare = 1;
+        ember.emit(new THREE.Vector3(-12, 0.8, 6), { n: 16, spread: 0.5, up: 2.2, size: 0.12, grow: 0.3, life: 1.6 });
+        return { status: '타닥타닥, 불이 활활 타올라요' };
+      },
+    },
+    {
+      id: 'aurora', label: '오로라 수정', verb: '오로라 부르기', shared: true, cool: 4000,
+      pos: new THREE.Vector3(12.8, 0, -7.6),
+      run() {
+        sound.shimmer();
+        palIdx = (palIdx + 1) % palettes.length;
+        auroras.forEach((m, i) => {
+          const [a, b] = palettes[(palIdx + i) % palettes.length];
+          m.uniforms.uColorA.value.setHex(a);
+          m.uniforms.uColorB.value.setHex(b);
+        });
+        crystal.material.emissive.setHex(palettes[palIdx][0]);
+        pulse = 1;
+        return { status: '오로라 빛이 바뀌었어요' };
+      },
+    },
+  ];
+  for (const hs of hotspots) hs.marker = spotMarker(group, hs.pos, 0x9fd8ff);
 
   let boost = 0;
   let boostTarget = 0;
@@ -297,6 +427,9 @@ export function buildAurora(scene) {
     ...cake,
     ...lights,
     bounds: { w: (R - 1.2) * 2, d: (R - 1.2) * 2, r: R - 1.2 },
+    hotspots,
+    roam: 15,
+    zones: [{ kind: 'slide', test: (p) => (p.x - RINK.x) ** 2 + (p.z - RINK.z) ** 2 < rinkR * rinkR }],
     entrance: new THREE.Vector3(0, 0, R - 1.6),
     cakeTop: new THREE.Vector3(0, 1.9, 0),
     hemiBase: 0.95,
@@ -312,7 +445,14 @@ export function buildAurora(scene) {
     ignite(k) { boostTarget = k; },
     extraUpdate(t, dt) {
       boost += (boostTarget - boost) * Math.min(1, dt * 1.5);
-      for (const m of auroras) { m.uniforms.uTime.value = t; m.uniforms.uBoost.value = boost; }
+      pulse = Math.max(0, pulse - dt / 3);
+      for (const m of auroras) { m.uniforms.uTime.value = t; m.uniforms.uBoost.value = Math.max(boost, pulse); }
+      crystal.rotation.y = t * 0.6;
+      crystal.position.y = 1.9 + Math.sin(t * 1.5) * 0.12;
+      if (snowWave > 0) { snowWave = Math.max(0, snowWave - dt); snowman.rotation.z = Math.sin(snowWave * 12) * 0.08 * snowWave; }
+      flare = Math.max(0, flare - dt / 4);
+      fx.tick(dt);
+      ember.tick(dt);
       const arr = snowGeo.attributes.position.array;
       for (let i = 0; i < SNOW; i++) {
         arr[i * 3 + 1] -= dt * (1.2 + (i % 5) * 0.25);
@@ -320,7 +460,8 @@ export function buildAurora(scene) {
         if (arr[i * 3 + 1] < -0.6) arr[i * 3 + 1] = 40;
       }
       snowGeo.attributes.position.needsUpdate = true;
-      fireLight.intensity = 2.2 + Math.sin(t * 9) * 0.3 + Math.sin(t * 23) * 0.2;
+      fireLight.intensity = 2.2 + flare * 4 + Math.sin(t * 9) * 0.3 + Math.sin(t * 23) * 0.2;
+      embers.scale.set(1 + flare * 0.6, 0.5 + flare * 0.8, 1 + flare * 0.6);
     },
   });
 }

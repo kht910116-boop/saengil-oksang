@@ -141,7 +141,7 @@ function count(type) {
   try { q.metric.run(kstDay(), type); } catch { /* 측정 실패는 서비스에 영향 없음 */ }
 }
 const CLIENT_EVENTS = new Set(['landing_visit', 'venue_preview', 'demo_visit', 'friend_visit', 'owner_door', 'owner_enter', 'ignite_seen', 'letters_open',
-  'share_click', 'cta_click', 'photo_save', 'video_save', 'calendar_click', 'react', 'inapp_open_external', 'webgl_fail', 'group_photo_save', 'memory_save']);
+  'share_click', 'cta_click', 'photo_save', 'video_save', 'calendar_click', 'react', 'inapp_open_external', 'webgl_fail', 'group_photo_save', 'memory_save', 'lite_on', 'lite_off', 'spot_use', 'venue_preview', 'emote']);
 
 function clean(s, max) {
   return String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max);
@@ -402,6 +402,7 @@ function deleteRoof(roofId, closeCode = 4003) {
   q.deleteRoofLanterns.run(roofId);
   q.deleteRoof.run(roofId);
   photoAt.delete(roofId);
+  for (const k of fxAt.keys()) if (k.startsWith(`${roofId}:`)) fxAt.delete(k);
   push.removeRoof(roofId);
   const room = rooms.get(roofId);
   if (room) for (const p of room.values()) p.ws.close(closeCode, closeCode === 4004 ? 'ended' : 'deleted');
@@ -691,8 +692,8 @@ server.on('upgrade', (req, socket, head) => {
         const now = Date.now();
         if (now - peer.last < 60) return;
         peer.last = now;
-        peer.x = clampNum(msg.x, -13, 13);
-        peer.z = clampNum(msg.z, -10, 10);
+        peer.x = clampNum(msg.x, -40, 40); // 넓어진 장소(배 길이 등)를 담는 범위
+        peer.z = clampNum(msg.z, -40, 40);
         peer.dx = clampNum(msg.dx, -1, 1);
         peer.dirty = true;
       } else if (msg.t === 'hop' && peer.joined && !peer.spectator) {
@@ -707,6 +708,21 @@ server.on('upgrade', (req, socket, head) => {
         photoAt.set(roof.id, now);
         count('group_photo');
         broadcast(roof.id, { t: 'photo', at: now + 5000 });
+      } else if (msg.t === 'emote' && peer.joined && !peer.spectator && EMOTES.has(msg.kind)) {
+        // 캐릭터 동작: 한 사람은 0.8초에 한 번
+        const now = Date.now();
+        if (now - (peer.lastEmote || 0) < 800) return;
+        peer.lastEmote = now;
+        broadcast(roof.id, { t: 'emote', id: peer.id, kind: msg.kind }, peer.id);
+      } else if (msg.t === 'fx' && peer.joined && !peer.spectator && FX_IDS.has(msg.id)) {
+        // 장소 놀거리(뱃고동·눈사람·열기구 등): 모두의 화면에서 같이 일어나게 중계. 한 사람은 1.5초에 한 번, 같은 놀거리는 방마다 1초에 한 번
+        const now = Date.now();
+        if (now - (peer.lastFx || 0) < 1500) return;
+        const key = `${roof.id}:${msg.id}`;
+        if (now - (fxAt.get(key) || 0) < 1000) return;
+        peer.lastFx = now;
+        fxAt.set(key, now);
+        broadcast(roof.id, { t: 'fx', id: msg.id, by: peer.id }, peer.id);
       } else if (msg.t === 'react' && peer.joined && REACTIONS.has(msg.kind)) {
         const now = Date.now();
         if (now - peer.lastReact < 700) return; // 도배 방지
@@ -729,6 +745,9 @@ function view(p) {
   return { id: p.id, name: p.name, color: p.color, hat: p.hat, outfit: p.outfit, x: p.x, z: p.z, owner: p.isOwner };
 }
 const REACTIONS = new Set(['clap', 'heart', 'party']);
+const EMOTES = new Set(['hop', 'sit', 'wave', 'dance', 'bow', 'flip', 'spin', 'cheer', 'wiggle', 'surprise', 'cry', 'stretch', 'lie', 'sleep', 'heart']);
+const FX_IDS = new Set(['horn', 'wheel', 'aurora', 'snowman', 'fire', 'ride1', 'ride2', 'ride3', 'bell', 'tpA', 'tpB', 'disco']);
+const fxAt = new Map(); // 놀거리 도배 방지(파티장:놀거리 → 마지막 시각)
 const photoAt = new Map(); // 파티장별 마지막 단체 사진 시각(도배 방지)
 function avatarCount(room) {
   let n = 0;

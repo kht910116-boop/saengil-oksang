@@ -104,6 +104,31 @@ test('단체 사진: 주인공만, 문이 열린 뒤에만, 도배 방지', asyn
   owner.close();
 });
 
+test('캐릭터 동작·장소 놀거리: 목록에 있는 것만 중계, 도배 방지', async () => {
+  const { data: roof } = await create();
+  const open = () => new Promise((resolve) => {
+    const ws = new WebSocket(`ws://localhost:${PORT}/ws?room=${roof.id}`);
+    ws.msgs = [];
+    ws.on('message', (raw) => { const m = JSON.parse(raw); ws.msgs.push(m); if (m.t === 'welcome') resolve(ws); });
+    ws.on('open', () => ws.send(JSON.stringify({ t: 'join', name: '수아', color: gold })));
+  });
+  const a = await open();
+  const b = await open();
+  a.send(JSON.stringify({ t: 'emote', kind: 'flip' }));
+  a.send(JSON.stringify({ t: 'emote', kind: 'dance' })); // 0.8초 안에 또 → 무시
+  a.send(JSON.stringify({ t: 'emote', kind: 'hack' }));
+  a.send(JSON.stringify({ t: 'fx', id: 'horn' }));
+  a.send(JSON.stringify({ t: 'fx', id: 'rm-rf' }));
+  await new Promise((r) => setTimeout(r, 250));
+  const em = b.msgs.filter((m) => m.t === 'emote');
+  assert.deepEqual(em.map((m) => m.kind), ['flip']);
+  const fx = b.msgs.filter((m) => m.t === 'fx');
+  assert.deepEqual(fx.map((m) => m.id), ['horn']);
+  assert.ok(fx[0].by, '누가 했는지(아바타 id) 함께 보냄');
+  a.close();
+  b.close();
+});
+
 test('점등 알림: 키 공개, 구독 검사, 파티장과 함께 삭제', async () => {
   const key = await call('GET', '/api/push/key');
   assert.equal(key.status, 200);

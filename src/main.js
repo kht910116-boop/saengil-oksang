@@ -275,6 +275,7 @@ function loadVenue(id) {
   const v = VENUES[id] ? id : DEFAULT_VENUE;
   if (world.id === v) return world;
   world.dispose();
+  clearSpotLabels();
   world = buildWorld(scene, v);
   sound.setVenue(v);
   computeSlots();
@@ -415,10 +416,14 @@ function clampToBounds(p, extra = 0) {
     if (d > r) { p.x *= r / d; p.z *= r / d; }
     return;
   }
-  const hw = b.w / 2 - 0.6 + extra;
-  const hd = b.d / 2 - 0.6 + extra;
-  p.x = THREE.MathUtils.clamp(p.x, -hw, hw);
-  p.z = THREE.MathUtils.clamp(p.z, -hd, hd);
+  // 사각형: 가운데 기준(w, d) 또는 한쪽으로 긴 배처럼 범위(minX~maxX, minZ~maxZ)
+  const minX = (b.minX ?? -b.w / 2) + 0.6 - extra;
+  const maxX = (b.maxX ?? b.w / 2) - 0.6 + extra;
+  const minZ = (b.minZ ?? -b.d / 2) + 0.6 - extra;
+  const maxZ = (b.maxZ ?? b.d / 2) - 0.6 + extra;
+  p.x = THREE.MathUtils.clamp(p.x, minX, maxX);
+  p.z = THREE.MathUtils.clamp(p.z, minZ, maxZ);
+  world.clampExtra?.(p, extra); // 뱃머리처럼 모양이 특별한 곳
 }
 function collide(p) {
   clampToBounds(p);
@@ -453,9 +458,21 @@ function updateMe(dt) {
     if (d.length() < 0.15) me.target = null;
     else move.copy(d.normalize());
   }
-  me.av.root.position.addScaledVector(move, 3.6 * dt);
+  const zone = world.zoneAt?.(me.av.root.position);
+  if (zone?.kind === 'slide') {
+    // 얼음 위: 미끄러지듯 가속하고 천천히 멈춘다
+    me.vel = me.vel || new THREE.Vector3();
+    me.vel.addScaledVector(move, 7 * dt);
+    me.vel.multiplyScalar(Math.max(0, 1 - 0.55 * dt));
+    if (me.vel.length() > 5) me.vel.setLength(5);
+    me.av.root.position.addScaledVector(me.vel, dt);
+    move.copy(me.vel).multiplyScalar(0.25);
+  } else {
+    me.vel?.set(0, 0, 0);
+    me.av.root.position.addScaledVector(move, 3.6 * dt);
+  }
   collide(me.av.root.position);
-  me.speed = move.length();
+  me.speed = Math.min(1, move.length());
   me.dirX = move.dot(camRight);
 }
 
@@ -463,17 +480,37 @@ function updateNpc(p, dt) {
   if (!p.target) {
     p.wait -= dt;
     if (p.wait <= 0) {
-      const a = Math.random() * Math.PI * 2;
-      const r = Math.random() < 0.4 ? 2.2 + Math.random() : 3 + Math.random() * 7;
-      p.target = new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r);
+      const spots = world.hotspots || [];
+      if (MODE === 'demo' && spots.length && Math.random() < 0.35) {
+        // 샘플의 친구들은 가끔 놀거리로 가서 직접 써 본다
+        p.goal = spots[Math.floor(Math.random() * spots.length)];
+        p.target = p.goal.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.2, 0, (Math.random() - 0.5) * 1.2));
+      } else {
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.random() < 0.4 ? 2.2 + Math.random() : 3 + Math.random() * (world.roam || 7);
+        p.target = new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r);
+      }
       collide(p.target);
     }
     p.speed = 0;
     p.dirX = 0;
+    // 서 있는 동안 가끔 동작(샘플 친구들)
+    p.emoteT = (p.emoteT ?? 2 + Math.random() * 6) - dt;
+    if (p.emoteT <= 0 && !ceremony) {
+      p.emoteT = 5 + Math.random() * 8;
+      const pick = EMOTES[Math.floor(Math.random() * EMOTES.length)][0];
+      playEmote(p, pick);
+    }
     return;
   }
   const d = p.target.clone().sub(p.av.root.position);
-  if (d.length() < 0.2) { p.target = null; p.wait = 2 + Math.random() * 5; p.speed = 0; return; }
+  if (d.length() < 0.2) {
+    p.target = null;
+    p.wait = 2 + Math.random() * 5;
+    p.speed = 0;
+    if (p.goal) { useHotspot(p.goal, p, { remote: true }); p.goal = null; }
+    return;
+  }
   d.normalize();
   p.av.root.position.addScaledVector(d, 1.6 * dt);
   collide(p.av.root.position);
@@ -487,7 +524,8 @@ function updatePeer(p, dt) {
   if (!p.net) return;
   const pos = p.av.root.position;
   const before = pos.clone();
-  pos.lerp(p.net, Math.min(1, dt * 8));
+  if (pos.distanceTo(p.net) > 6) pos.copy(p.net); // 순간이동처럼 멀리 뛰면 바로 옮긴다
+  else pos.lerp(p.net, Math.min(1, dt * 8));
   const moved = before.distanceTo(pos) / Math.max(dt, 0.001);
   p.speed = moved > 0.4 ? 1 : 0;
   camRight.set(Math.cos(yaw), 0, -Math.sin(yaw));
@@ -1244,6 +1282,146 @@ function addCandleButton() {
     } catch (err) { setStatus(err.message); btn.disabled = false; }
   });
 }
+// ── 캐릭터 동작: 점프·앉기·춤 등 15가지. 모두의 화면에서 같이 보인다 ──
+const EMOTES = [
+  ['hop', '점프'], ['sit', '앉기'], ['wave', '손 흔들기'], ['dance', '춤추기'], ['bow', '꾸벅 인사'],
+  ['flip', '공중제비'], ['spin', '빙글빙글'], ['cheer', '만세'], ['wiggle', '엉덩이춤'], ['surprise', '깜짝'],
+  ['cry', '감동'], ['stretch', '기지개'], ['lie', '벌러덩'], ['sleep', '졸기'], ['heart', '하트'],
+];
+const POSES = new Set(['sit', 'lie', 'sleep', 'dance']);
+function playEmote(person, kind) {
+  if (!person?.av) return;
+  if (kind === 'hop') person.av.hop();
+  else if (POSES.has(kind)) { person.target = null; person.av.pose = kind; person.wait = 6 + Math.random() * 6; }
+  else person.av.gesture(kind);
+  if (kind === 'surprise') { showFloat(person, '!', 'emote-bang'); sound.boing(); }
+  if (kind === 'cry') showFloat(person, 'ㅠㅠ', 'emote-cry');
+  if (kind === 'flip') sound.whoosh();
+  if (kind === 'heart') showFloat(person, '♥', 'react-heart');
+}
+function sendEmote(kind) {
+  if (!me || ceremony) return;
+  playEmote(me, kind);
+  conn?.send({ t: 'emote', kind });
+  track('emote');
+}
+// 동작 고르기 판: 리액션 버튼 옆 '동작' 버튼으로 연다
+function wireEmotes() {
+  const bar = document.querySelector('#reactions');
+  if (!bar || bar.querySelector('[data-emote-open]')) return;
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.dataset.emoteOpen = '1';
+  open.setAttribute('aria-label', '동작');
+  open.textContent = '동작';
+  bar.appendChild(open);
+  const panel = document.createElement('div');
+  panel.id = 'emotes';
+  panel.hidden = true;
+  panel.innerHTML = EMOTES.map(([k, n]) => `<button type="button" data-emote="${k}">${n}</button>`).join('');
+  document.body.appendChild(panel);
+  open.addEventListener('click', () => { panel.hidden = !panel.hidden; });
+  panel.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-emote]');
+    if (!b) return;
+    try { navigator.vibrate?.(10); } catch { /* 진동 없는 기기 */ }
+    sendEmote(b.dataset.emote);
+    panel.hidden = true;
+  });
+}
+// 조는 동안 머리 위에 Zzz
+let zzzT = 0;
+function updatePoses(dt) {
+  zzzT -= dt;
+  if (zzzT > 0) return;
+  zzzT = 1.4;
+  for (const p of people) if (p.av.pose === 'sleep') showFloat(p, 'Zzz', 'emote-zzz');
+}
+
+// ── 장소별 놀거리: 가까이 가면 버튼이 뜨고, 함께 보는 놀거리는 모두의 화면에서 똑같이 일어난다 ──
+const spotBtn = document.createElement('button');
+spotBtn.id = 'spot-btn';
+spotBtn.className = 'btn primary';
+spotBtn.hidden = true;
+document.body.appendChild(spotBtn);
+let nearSpot = null;
+const spotCool = new Map();
+const spotLabels = new Map();
+let viewOverride = null;
+let spotShotTitle = null; // 포토존 사진 제목 // 망원경·포토존처럼 잠깐 카메라를 다른 곳으로
+function spotCtx(person) {
+  return { person, isMe: person === me, sound, confetti, sparks, people, setStatus, now: performance.now() };
+}
+function useHotspot(hs, person, { remote = false } = {}) {
+  if (!hs || ceremony) return;
+  const res = hs.run?.(spotCtx(person)) || {};
+  if (person === me) {
+    if (res.view) {
+      viewOverride = { ...res.view, until: performance.now() + (res.view.ms || 5000) };
+      document.body.classList.add('scope-view');
+    }
+    if (res.photo) setTimeout(() => { spotShotTitle = res.photo; groupShotPending = true; sound.shutter(); }, 1400);
+    if (res.status) setStatus(res.status, 4000);
+    if (hs.shared && conn && !remote) conn.send({ t: 'fx', id: hs.id });
+    track('spot_use');
+  }
+}
+function updateSpots() {
+  const spots = world.hotspots || [];
+  // 이름표: 가까운 놀거리만
+  for (const hs of spots) {
+    let el = spotLabels.get(hs);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'spot-label';
+      el.textContent = hs.label;
+      labelsEl.appendChild(el);
+      spotLabels.set(hs, el);
+    }
+    const far = !me || me.av.root.position.distanceTo(hs.pos) > 15 || ceremony || ignite;
+    if (far) el.style.display = 'none';
+    else placeLabel(el, hs.pos, hs.labelY || 1.6);
+  }
+  let best = null;
+  if (me && !ceremony && !ignite && !groupPhoto && !procession && !(me.busyUntil > performance.now())) {
+    let bd = Infinity;
+    for (const hs of spots) {
+      const d = me.av.root.position.distanceTo(hs.pos);
+      if (d < (hs.r || 2.4) && d < bd) { bd = d; best = hs; }
+    }
+  }
+  if (best !== nearSpot) {
+    nearSpot = best;
+    spotBtn.hidden = !best;
+    if (best) spotBtn.textContent = best.verb;
+  }
+}
+spotBtn.addEventListener('click', () => {
+  const hs = nearSpot;
+  if (!hs) return;
+  const last = spotCool.get(hs.id) || 0;
+  if (performance.now() - last < (hs.cool || 2500)) return;
+  spotCool.set(hs.id, performance.now());
+  useHotspot(hs, me);
+});
+function clearSpotLabels() { for (const el of spotLabels.values()) el.remove(); spotLabels.clear(); nearSpot = null; spotBtn.hidden = true; }
+// 구역 효과: 무중력은 둥둥, 트램펄린은 통통, 댄스 플로어는 들썩(위치만으로 정하므로 모두의 화면에서 같다)
+function applyZones(t, dt) {
+  const now = performance.now();
+  people.forEach((p, i) => {
+    if (p.busyUntil > now) return; // 열기구처럼 놀거리가 직접 움직이는 중
+    const z = !ceremony && world.zoneAt?.(p.av.root.position);
+    let lift = 0;
+    if (z?.kind === 'float') lift = 0.9 + Math.sin(t * 1.3 + i) * 0.3;
+    else if (z?.kind === 'bounce') lift = Math.abs(Math.sin(t * 2.6 + i * 0.7)) * 2.3;
+    p.av.lift = z?.kind === 'bounce' ? lift : THREE.MathUtils.lerp(p.av.lift, lift, Math.min(1, dt * 3));
+    if (!ceremony && !song) {
+      p.av.sway = z?.kind === 'dance' ? 1 : 0;
+      if (z?.kind === 'dance') p.av.swayPhase = t * 6 + i;
+    }
+  });
+}
+
 // ── 의식(점등식·촛불 끄기): 모두가 정해진 대열에 서고, 하트·별·박수만 보낼 수 있다 ──
 // 대열은 모든 화면에서 같은 규칙으로 계산한다: 주인공은 케이크 바로 앞, 친구들은 케이크 뒤 반원에 가운데부터.
 let ceremony = null;
@@ -1280,7 +1458,9 @@ function startCeremony(kind) {
   hideBubble();
   if (!sheetLocked) closeSheet();
   ceremony = { kind, slots: ceremonySpots(kind) };
-  for (const p of people) p.target = null;
+  for (const p of people) { p.target = null; p.goal = null; p.busyUntil = 0; p.av.lift = 0; p.av.pose = null; }
+  viewOverride = null;
+  document.body.classList.remove('scope-view');
   document.body.classList.add('ceremony');
   let hint = document.querySelector('#ceremony-hint');
   if (!hint) {
@@ -1572,6 +1752,7 @@ function wireLiteButton() {
 // ── 주인공 입장 행진: 친구들이 양옆으로 줄을 서고, 주인공이 조명을 받으며 입구에서 케이크까지 걸어 들어온다 ──
 let procession = null;
 let ogPose = false;
+let overviewCam = false;
 let processionDone = false;
 const spotLight = new THREE.SpotLight(0xfff0d0, 0, 22, 0.3, 0.55, 1.1);
 scene.add(spotLight, spotLight.target);
@@ -1717,19 +1898,19 @@ function updateGroupPhoto(dt) {
     people.forEach((p, i) => setTimeout(() => p.av.hop(), i * 50));
   }
 }
-async function finishGroupPhoto(shot) {
+async function finishGroupPhoto(shot, title = null) {
   const blob = await composePhoto(shot, {
     owner: ROOF_STATE.owner,
-    when: `단체 사진 · ${VENUES[world.id]?.name || ''}`,
+    when: `${title || '단체 사진'} · ${VENUES[world.id]?.name || ''}`,
     lanterns: lanterns.length,
     gifts: gifts.list.length,
     friends: people.length,
   });
   if (!blob) return;
   const url = URL.createObjectURL(blob);
-  openSheet(`<h2>단체 사진을 찍었어요</h2><p class="sheet-lead">모두의 화면에서 같은 순간을 찍었어요.</p>
+  openSheet(`<h2>${title ? `${esc(title)} 사진을 찍었어요` : '단체 사진을 찍었어요'}</h2><p class="sheet-lead">${title ? '사진을 저장해서 친구들에게 보내보세요.' : '모두의 화면에서 같은 순간을 찍었어요.'}</p>
     <img class="photo-preview" src="${url}" alt="${esc(ROOF_STATE.owner)}의 생일 파티 단체 사진">
-    <button class="btn primary wide" id="save-group">단체 사진 저장</button>`);
+    <button class="btn primary wide" id="save-group">사진 저장</button>`);
   sheetBody.querySelector('#save-group').addEventListener('click', async () => {
     track('group_photo_save');
     const r = await saveVideo(blob, 'today-hero-group.jpg');
@@ -1829,6 +2010,13 @@ document.querySelector('#cta a')?.addEventListener('click', () => track('cta_cli
 // ── 리액션(박수·하트·폭죽) ──
 const REACT_SYMBOL = { clap: '짝짝', heart: '♥', party: '✦' };
 const floats = [];
+function showFloat(person, text, cls = '') {
+  const el = document.createElement('span');
+  el.className = `react-float ${cls}`;
+  el.textContent = text;
+  labelsEl.appendChild(el);
+  floats.push({ el, person, t: 0, dx: (Math.random() - 0.5) * 0.4 });
+}
 function showReaction(person, kind) {
   sound.react(kind, !!person && person === me);
   person?.av?.gesture(kind === 'clap' ? 'clap' : kind === 'heart' ? 'heart' : 'cheer');
@@ -2028,6 +2216,7 @@ function startDemo() {
   wireLettersButton();
   wireGroupPhotoButton();
   wireLiteButton();
+  wireEmotes();
   wireReactions();
   updateGoal();
   track('demo_visit');
@@ -2227,6 +2416,7 @@ function enterRoom(visitor) {
   wireLettersButton();
   wireGroupPhotoButton();
   wireLiteButton();
+  wireEmotes();
   wireReactions();
   if (!ROOF_STATE.isOwner) wireInviteButton();
   setStatus(ROOF_STATE.isOwner ? '친구들이 준비한 파티장이에요. 곧 점등이에요' : `등불을 달고, ${revealLabel(ROOF_STATE.igniteAt)}에 다시 와서 같이 불을 켜요`, 6500);
@@ -2277,6 +2467,12 @@ function handleNet(m) {
   } else if (m.t === 'candles') {
     if (m.songAt) startSong(m.songAt - serverOffset);
     else blowCandles(true);
+  } else if (m.t === 'emote') {
+    playEmote(peersById.get(m.id), m.kind);
+  } else if (m.t === 'fx') {
+    const hs = (world.hotspots || []).find((h) => h.id === m.id);
+    const who = m.by ? peersById.get(m.by) : null;
+    if (hs && who) useHotspot(hs, who, { remote: true });
   } else if (m.t === 'photo') {
     startGroupPhoto(m.at - serverOffset);
   } else if (m.t === 'ended') {
@@ -2348,9 +2544,10 @@ function frame() {
   else if (ceremony) updateCeremony(dt);
   else {
     const busy = candleBlow?.blower; // 촛불을 부는 사람은 연출이 움직인다
-    if (me && me !== busy) updateMe(dt);
+    const nowMs = performance.now();
+    if (me && me !== busy && !(me.busyUntil > nowMs)) updateMe(dt);
     for (const p of people) {
-      if (p === busy) continue;
+      if (p === busy || p.busyUntil > nowMs) continue; // 열기구를 탄 사람은 놀거리가 움직인다
       // 촛불을 부는 동안 다른 사람은 케이크와 카메라 사이를 비켜 준다
       if (candleBlow && p.av.root.position.z > 0.2 && p.av.root.position.z < 7) p.av.root.position.z -= dt * 3.5;
       if (p.npc) updateNpc(p, dt);
@@ -2358,6 +2555,9 @@ function frame() {
     }
   }
   updateCandleBlow(dt);
+  applyZones(t, dt);
+  updatePoses(dt);
+  updateSpots();
   updateSong();
   updateIgniteCountdown();
 
@@ -2380,7 +2580,21 @@ function frame() {
   }
 
   // 카메라
-  if (ogPose) {
+  if (viewOverride && performance.now() > viewOverride.until) { viewOverride = null; document.body.classList.remove('scope-view'); resize(); }
+  if (viewOverride && !ceremony && !ignite) {
+    camPos.lerp(viewOverride.pos, Math.min(1, dt * 2.5));
+    camera.position.copy(camPos);
+    camLook.lerp(viewOverride.look, Math.min(1, dt * 2.5));
+    camera.fov = THREE.MathUtils.lerp(camera.fov, viewOverride.fov || camera.fov, Math.min(1, dt * 2));
+    camera.updateProjectionMatrix();
+  } else if (overviewCam) {
+    const b = world.bounds;
+    const cz = ((b.minZ ?? -(b.d || 2 * b.r) / 2) + (b.maxZ ?? (b.d || 2 * b.r) / 2)) / 2;
+    const span = Math.max(b.maxX ? b.maxX - b.minX : b.w || 2 * b.r, b.maxZ ? b.maxZ - b.minZ : b.d || 2 * b.r);
+    camera.position.set(0, span * 0.62, cz + span * 0.62);
+    world.clampCamera?.(camera.position);
+    camLook.set(0, 0, cz);
+  } else if (ogPose) {
     camera.position.set(0, 5.2, 12.5);
     world.clampCamera?.(camera.position);
     camera.position.x += 0.9; // 돔 뼈대가 화면 한가운데를 가리지 않게 살짝 비켜서
@@ -2400,14 +2614,15 @@ function frame() {
   } else {
     const mp = me.av.root.position;
     const camDist = dist + (ignite ? 3 : 0);
-    const want = new THREE.Vector3(mp.x + Math.sin(yaw) * camDist, 2.6 + camDist * 0.42, mp.z + Math.cos(yaw) * camDist);
+    const lift = me.av.lift || 0; // 열기구·트램펄린으로 떠오르면 카메라도 따라 올라간다
+    const want = new THREE.Vector3(mp.x + Math.sin(yaw) * camDist, 2.6 + camDist * 0.42 + lift, mp.z + Math.cos(yaw) * camDist);
     clampToBounds(want, 0.2);
     world.clampCamera?.(want);
     const sky = ignite ? THREE.MathUtils.smoothstep(ignite.t, 0.6, 2.4) : 0;
     want.y -= sky * (want.y - 1.4);
     camPos.lerp(want, Math.min(1, dt * (ignite ? 2 : 5)));
     camera.position.copy(camPos);
-    camLook.lerp(new THREE.Vector3(mp.x * (1 - sky), 1.6 + sky * 7.4, mp.z * (1 - sky) + sky * -6), Math.min(1, dt * (ignite ? 2 : 6)));
+    camLook.lerp(new THREE.Vector3(mp.x * (1 - sky), 1.6 + lift * (1 - sky) + sky * 7.4, mp.z * (1 - sky) + sky * -6), Math.min(1, dt * (ignite ? 2 : 6)));
   }
   camera.lookAt(camLook);
 
@@ -2441,7 +2656,7 @@ function frame() {
 
   if (bubbleFor) placeLabel(bubble, bubbleFor.mesh.position, bubbleY);
 
-  world.update(t, dt);
+  world.update(t, dt, { people, me });
   gifts.update(dt, t, { camera, viewHeight: renderer.domElement.height });
   updateIgnite(dt);
   sparks.update(dt);
@@ -2458,7 +2673,9 @@ function frame() {
   }
   if (groupShotPending) {
     groupShotPending = false;
-    try { finishGroupPhoto(snapshot(renderer.domElement)); } catch (e) { reportError(`group photo: ${e.message}`); }
+    const title = spotShotTitle;
+    spotShotTitle = null;
+    try { finishGroupPhoto(snapshot(renderer.domElement), title); } catch (e) { reportError(`group photo: ${e.message}`); }
   }
   if (!booted) {
     booted = true;
@@ -2475,6 +2692,12 @@ frame();
 
 // 테스트용 핸들
 window.__lantern = {
+  // 시험용: 높은 곳에서 장소 전체 보기, 놀거리 목록, 놀거리 앞으로 순간 이동
+  overview(on = true) { overviewCam = on; },
+  get spots() { return (world.hotspots || []).map((h) => ({ id: h.id, label: h.label })); },
+  goSpot(id) { const h = (world.hotspots || []).find((x) => x.id === id); if (h && me) { me.av.root.position.set(h.pos.x, 0, h.pos.z + 0.3); me.target = null; } },
+  get lift() { return me ? me.av.lift : 0; },
+  emote(kind) { sendEmote(kind); },
   // 미리보기 이미지(카카오톡·SNS) 촬영용: 불이 켜진 장면을 정해진 각도에서
   ogPose() { ogPose = true; setLitInstantly(); for (const b of world.bulbs) b.material.emissiveIntensity = 2.6; },
   get mode() { return MODE; },
