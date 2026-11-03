@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PAL, skyDome, stars, cakeTable, decoBalloons, stringLights, finishWorld, spotMarker, puffs, mergeStatic } from './common.js';
 import { sound } from '../audio.js';
+import { partyDressing } from './party.js';
 
 // 오로라 유리돔: 눈 덮인 설원 한가운데 투명한 유리 돔. 점등 때 오로라가 하늘을 덮는다.
 const AURORA_VERT = `
@@ -420,6 +421,15 @@ export function buildAurora(scene) {
     },
   ];
   for (const hs of hotspots) hs.marker = spotMarker(group, hs.pos, 0x9fd8ff);
+  // 파티 차림: 오른쪽 뷔페, 케이크 옆 선물, 현수막, 입구 풍선 아치, 돔 안 고리 기둥 사이 깃발 줄
+  const party = partyDressing(group, {
+    buffet: { x: 9, z: -2, ry: -Math.PI / 2 },
+    arch: { x: 0, z: R - 2.4 },
+    banner: { x: 0, y: 3.0, z: -5.6 },
+    bunting: ring.map((p, i) => [new THREE.Vector3(p.x, 3.4, p.z), new THREE.Vector3(ring[(i + 1) % ring.length].x, 3.4, ring[(i + 1) % ring.length].z), 0.5]),
+  });
+  obstacles.push(...party.obstacles);
+  hotspots.push(...party.hotspots);
 
   let boost = 0;
   let boostTarget = 0;
@@ -436,7 +446,7 @@ export function buildAurora(scene) {
     roam: 15,
     zones: [{ kind: 'slide', test: (p) => (p.x - RINK.x) ** 2 + (p.z - RINK.z) ** 2 < rinkR * rinkR }],
     entrance: new THREE.Vector3(0, 0, R - 1.6),
-    cakeTop: new THREE.Vector3(0, 1.9, 0),
+    cakeTop: new THREE.Vector3(0, 2.4, 0),
     hemiBase: 0.95,
     palette: { ...PAL, sky: 0x0a1830 },
     // 내 시점 카메라는 유리 돔 안에 머문다(뼈대가 화면을 가리지 않게)

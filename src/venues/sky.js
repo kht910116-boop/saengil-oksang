@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PAL, skyDome, stars, cakeTable, decoBalloons, stringLights, finishWorld, spotMarker, puffs, mergeStatic } from './common.js';
 import { sound } from '../audio.js';
+import { partyDressing } from './party.js';
 
 // 구름 위 열기구 광장: 노을 진 구름 바다 위에 떠 있는 둥근 광장, 주변을 열기구들이 둥실 떠다닌다.
 function tileTexture() {
@@ -288,6 +289,15 @@ export function buildSky(scene) {
     },
   ];
   for (const hs of hotspots) hs.marker = spotMarker(group, hs.pos, 0xffb3c8);
+  // 파티 차림: 왼쪽 뷔페, 선물, 현수막, 입구 풍선 아치, 둘레 기둥 사이 깃발 줄
+  const party = partyDressing(group, {
+    buffet: { x: -8.5, z: 3, ry: Math.PI / 2 },
+    arch: { x: 0, z: R - 2.4 },
+    banner: { x: 0, y: 3.0, z: -5.6 },
+    bunting: poles.map((p, i) => [new THREE.Vector3(p.x, 3.6, p.z), new THREE.Vector3(poles[(i + 1) % poles.length].x, 3.6, poles[(i + 1) % poles.length].z), 0.5]),
+  });
+  obstacles.push(...party.obstacles);
+  hotspots.push(...party.hotspots);
   const trampTest = (p) => trampDefs.some(([x, z, r]) => (p.x - x) ** 2 + (p.z - z) ** 2 < r * r);
 
   return finishWorld(scene, group, {
@@ -303,7 +313,7 @@ export function buildSky(scene) {
     roam: 15,
     zones: [{ kind: 'bounce', test: trampTest }],
     entrance: new THREE.Vector3(0, 0, R - 1.6),
-    cakeTop: new THREE.Vector3(0, 1.9, 0),
+    cakeTop: new THREE.Vector3(0, 2.4, 0),
     hemiBase: 1.0,
     palette: { ...PAL, sky: 0x3a2a5c },
     extraUpdate(t, dt) {

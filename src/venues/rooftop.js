@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PAL, stars, moon, cakeTable, decoBalloons, stringLights, city, finishWorld, spotMarker, textPlane } from './common.js';
 import { sound } from '../audio.js';
+import { partyDressing } from './party.js';
 
 // 도시 옥상: 불 켜진 도시가 내려다보이는 밤 옥상
 export function buildRooftop(scene) {
@@ -191,6 +192,15 @@ export function buildRooftop(scene) {
     },
   ];
   for (const hs of hotspots) hs.marker = spotMarker(group, hs.pos, hs.id === 'photo' ? 0xff7ab8 : 0xffc46b);
+  // 파티 차림: 오른쪽 뷔페, 선물, 현수막, 계단 쪽 풍선 아치, 기둥 사이 깃발 줄
+  const party = partyDressing(group, {
+    buffet: { x: 8.5, z: 2, ry: -Math.PI / 2 },
+    arch: { x: 0, z: D / 2 - 1.6 },
+    banner: { x: 0, y: 3.0, z: -5.6 },
+    bunting: poles.map((p, i) => [new THREE.Vector3(p.x, 3.6, p.z), new THREE.Vector3(poles[(i + 1) % poles.length].x, 3.6, poles[(i + 1) % poles.length].z), 0.5]),
+  });
+  obstacles.push(...party.obstacles);
+  hotspots.push(...party.hotspots);
   const onFloor = (p) => Math.abs(p.x - DF.x) < half && Math.abs(p.z - DF.z) < half;
 
   return finishWorld(scene, group, {
@@ -222,7 +232,7 @@ export function buildRooftop(scene) {
       neonLight.intensity = 2 + Math.sin(t * 3) * 0.3 + (Math.sin(t * 17) > 0.97 ? -1.5 : 0); // 가끔 깜빡이는 네온
     },
     entrance: new THREE.Vector3(0, 0, D / 2 - 1.5),
-    cakeTop: new THREE.Vector3(0, 1.9, 0),
+    cakeTop: new THREE.Vector3(0, 2.4, 0),
     hemiBase: 0.9,
     palette: { ...PAL, sky: 0x1f2547 },
   });

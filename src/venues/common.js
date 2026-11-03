@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mergeStatic } from '../merge.js';
+import { mergeStatic, mergeColored } from '../merge.js';
 export { mergeStatic };
 
 // 여러 파티 장소가 같이 쓰는 3D 부품: 하늘, 별, 달, 케이크 테이블, 풍선, 전구 줄, 도시 야경
@@ -53,42 +53,165 @@ export function moon(group, pos, r = 5, color = 0xfff1d0) {
   return m;
 }
 
-// 케이크 테이블: 촛불 5개와 따뜻한 촛불 빛
+// 케이크 테이블: 식탁보를 두른 둥근 테이블 위 3단 케이크(크림이 흘러내리고 딸기·마카롱·장미 크림), 접시와 컵.
+// 움직이지 않는 부분은 한 덩어리로 합치고, 불꽃(흔들림·끄기)만 따로 둔다.
+export const CAKE = { tableR: 1.6, topY: 1.92, flameY: 2.14 }; // 다른 코드가 위치를 맞출 때 쓰는 치수
 export function cakeTable(group, { legColor = 0x3a3150, topColor = PAL.paper, at = new THREE.Vector3() } = {}) {
   const table = new THREE.Group();
-  const top = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 0.12, 28), new THREE.MeshStandardMaterial({ color: topColor, roughness: 0.7 }));
-  top.position.y = 0.95;
-  const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.25, 0.95, 12), new THREE.MeshStandardMaterial({ color: legColor, roughness: 0.8 }));
-  leg.position.y = 0.47;
-  const cake1 = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.32, 28), new THREE.MeshStandardMaterial({ color: PAL.pink, roughness: 0.6 }));
-  cake1.position.y = 1.17;
-  const cake2 = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.38, 0.26, 28), new THREE.MeshStandardMaterial({ color: PAL.paper, roughness: 0.6 }));
-  cake2.position.y = 1.46;
-  table.add(top, leg, cake1, cake2);
+  const deco = new THREE.Group();
+  const M = (color, emissive = 0.1, rough = 0.6, metal = 0) => new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: emissive, roughness: rough, metalness: metal });
+  const clothMat = M(topColor, 0.08, 0.9);
+  const R = CAKE.tableR;
+  // 테이블: 상판 + 바닥까지 내려오는 식탁보(물결 주름) + 아래 레이스 띠
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(R, R, 0.08, 40), clothMat);
+  top.position.y = 0.8;
+  const skirtGeo = new THREE.CylinderGeometry(R + 0.02, R + 0.18, 0.78, 48, 1, true);
+  const sp = skirtGeo.attributes.position;
+  for (let i = 0; i < sp.count; i++) {
+    const x = sp.getX(i);
+    const z = sp.getZ(i);
+    const a = Math.atan2(z, x);
+    const k = 1 + Math.sin(a * 18) * 0.025 * (0.5 - sp.getY(i)); // 아래로 갈수록 주름이 깊다
+    sp.setX(i, x * k);
+    sp.setZ(i, z * k);
+  }
+  skirtGeo.computeVertexNormals();
+  const skirtMat = M(0xf7d6df, 0.1, 0.9);
+  skirtMat.side = THREE.DoubleSide;
+  const skirt = new THREE.Mesh(skirtGeo, skirtMat);
+  skirt.position.y = 0.39;
+  const lace = new THREE.Mesh(new THREE.TorusGeometry(R + 0.03, 0.03, 6, 48), M(0xffffff, 0.2));
+  lace.rotation.x = Math.PI / 2;
+  lace.position.y = 0.76;
+  deco.add(top, skirt, lace);
+  // 3단 케이크
+  const tiers = [[0.85, 0.42, PAL.pink], [0.64, 0.36, PAL.paper], [0.44, 0.3, PAL.pink]];
+  let y = 0.84;
+  const cream = M(0xfff4e6, 0.06, 0.5);
+  const berry = M(0xe5484d, 0.15, 0.35);
+  const macCols = [PAL.mint, PAL.lavender, 0xffd97a];
+  tiers.forEach(([r, h, c], ti) => {
+    const tier = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 40), M(c, 0.05, 0.55));
+    tier.position.y = y + h / 2;
+    deco.add(tier);
+    // 위 가장자리에서 흘러내리는 크림
+    const drips = Math.round(r * 22);
+    for (let i = 0; i < drips; i++) {
+      const a = (i / drips) * Math.PI * 2;
+      const len = 0.06 + ((i * 37) % 7) * 0.018;
+      const d = new THREE.Mesh(new THREE.CapsuleGeometry(0.035, len, 3, 6), cream);
+      d.position.set(Math.cos(a) * (r + 0.005), y + h - len / 2 - 0.02, Math.sin(a) * (r + 0.005));
+      deco.add(d);
+    }
+    const lid = new THREE.Mesh(new THREE.CylinderGeometry(r + 0.012, r + 0.012, 0.05, 40), cream);
+    lid.position.y = y + h - 0.01;
+    deco.add(lid);
+    // 아래 테두리 장미 크림
+    const ros = Math.round(r * 26);
+    for (let i = 0; i < ros; i++) {
+      const a = (i / ros) * Math.PI * 2;
+      const b = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 6), cream);
+      b.position.set(Math.cos(a) * r, y + 0.03, Math.sin(a) * r);
+      deco.add(b);
+    }
+    // 단 위 장식: 1·2단은 딸기와 마카롱을 번갈아, 3단은 딸기 고리
+    const n = ti === 2 ? 8 : 10;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + ti * 0.3;
+      const rr = ti === 2 ? r * 0.72 : (r + tiers[ti + 1][0]) / 2;
+      const px = Math.cos(a) * rr;
+      const pz = Math.sin(a) * rr;
+      if (ti < 2 && i % 2) {
+        const mac = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.06, 12), M(macCols[(i + ti) % 3], 0.15));
+        mac.rotation.z = Math.PI / 2;
+        mac.rotation.y = -a;
+        mac.position.set(px, y + h + 0.06, pz);
+        deco.add(mac);
+      } else {
+        const s = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.11, 8), berry);
+        s.rotation.x = Math.PI;
+        s.position.set(px, y + h + 0.07, pz);
+        const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.03, 5), M(0x5aa060, 0.1));
+        leaf.position.set(px, y + h + 0.135, pz);
+        deco.add(s, leaf);
+      }
+    }
+    y += h;
+  });
+  // 금빛 축하 토퍼
+  const gold = M(0xffd34d, 0.35, 0.3, 0.6);
+  for (const s of [-1, 1]) {
+    const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.35, 5), gold);
+    stick.position.set(s * 0.22, y + 0.17, -0.18);
+    deco.add(stick);
+  }
+  const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.11, 0), gold);
+  star.position.set(0, y + 0.45, -0.18);
+  star.scale.z = 0.4;
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.1, 0.02), gold);
+  bar.position.set(0, y + 0.32, -0.18);
+  deco.add(star, bar);
+  // 접시에 놓인 케이크 조각·포크·컵(테이블 둘레)
+  const plate = M(0xffffff, 0.1, 0.3);
+  const cupMat = new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, roughness: 0.1 });
+  const juice = M(0xff8fa8, 0.3, 0.2);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + 0.2;
+    const px = Math.cos(a) * 1.22;
+    const pz = Math.sin(a) * 1.22;
+    const pl = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.15, 0.02, 20), plate);
+    pl.position.set(px, 0.85, pz);
+    const slice = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.12, 3, 1, false, 0, Math.PI / 3.2), M(PAL.pink, 0.12));
+    slice.position.set(px, 0.92, pz);
+    slice.rotation.y = -a;
+    const sb = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.05, 6), berry);
+    sb.rotation.x = Math.PI;
+    sb.position.set(px, 1.0, pz);
+    const fork = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.006, 0.16), M(0xd8dde8, 0.1, 0.3, 0.8));
+    fork.position.set(px + Math.cos(a + 1.5) * 0.12, 0.865, pz + Math.sin(a + 1.5) * 0.12);
+    fork.rotation.y = -a;
+    const cx = Math.cos(a + 0.38) * 1.3;
+    const cz = Math.sin(a + 0.38) * 1.3;
+    const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.04, 0.13, 12), cupMat);
+    cup.position.set(cx, 0.905, cz);
+    const drink = new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.038, 0.08, 12), juice);
+    drink.position.set(cx, 0.885, cz);
+    deco.add(pl, slice, sb, fork, cup, drink);
+  }
+  table.add(mergeColored(deco));
+  // 초 5개(줄무늬)와 불꽃: 맨 윗단 위
   const flames = [];
+  const candleCols = [PAL.mint, PAL.lavender, 0xffd97a, PAL.mint, PAL.lavender];
+  const candleTop = y;
   for (let i = 0; i < 5; i++) {
     const a = (i / 5) * Math.PI * 2;
-    const candle = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.2, 6), new THREE.MeshStandardMaterial({ color: PAL.mint }));
-    candle.position.set(Math.cos(a) * 0.22, 1.69, Math.sin(a) * 0.22);
+    const cx = Math.cos(a) * 0.24;
+    const cz = Math.sin(a) * 0.24 + 0.05;
+    const candle = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.22, 8), M(candleCols[i], 0.2));
+    candle.position.set(cx, candleTop + 0.11, cz);
+    const stripe = new THREE.Mesh(new THREE.TorusGeometry(0.029, 0.007, 4, 10), M(0xffffff, 0.3));
+    stripe.rotation.x = Math.PI / 2;
+    stripe.position.set(cx, candleTop + 0.13, cz);
+    table.add(candle, stripe);
     // 불꽃은 심지 끝을 축으로 눕고 늘어나도록 아래쪽을 원점으로 둔다
-    const flameGeo = new THREE.SphereGeometry(0.04, 10, 8);
-    flameGeo.translate(0, 0.04, 0);
+    const flameGeo = new THREE.SphereGeometry(0.045, 10, 8);
+    flameGeo.translate(0, 0.045, 0);
     const flame = new THREE.Mesh(flameGeo, new THREE.MeshBasicMaterial({ color: 0xffd27a }));
     flame.scale.y = 1.6;
-    flame.position.set(candle.position.x, 1.79, candle.position.z);
-    table.add(candle, flame);
+    flame.position.set(cx, candleTop + 0.23, cz);
+    table.add(flame);
     flames.push(flame);
   }
-  const candleLight = new THREE.PointLight(0xffb45e, 3.6, 9, 1.6);
-  candleLight.position.y = 2.1;
+  const candleLight = new THREE.PointLight(0xffb45e, 3.2, 10, 1.7);
+  candleLight.position.y = candleTop + 0.55;
   table.add(candleLight);
   table.position.copy(at);
   group.add(table);
-  return { flames, candleLight, obstacle: { x: at.x, z: at.z, r: 1.6 } };
+  return { flames, candleLight, obstacle: { x: at.x, z: at.z, r: R + 0.4 } };
 }
 
 // 테이블 옆 장식 풍선
-export function decoBalloons(group, at = new THREE.Vector3(1.2, 0, -0.8), colors = [PAL.pink, PAL.mint, 0xffd97a, PAL.pink, PAL.lavender]) {
+export function decoBalloons(group, at = new THREE.Vector3(2.5, 0, -1.6), colors = [PAL.pink, PAL.mint, 0xffd97a, PAL.pink, PAL.lavender]) {
   const list = [];
   colors.forEach((col, i) => {
     const g = new THREE.Group();
@@ -279,7 +402,7 @@ export function puffs(group, { color = '235,235,245', additive = false } = {}) {
 }
 
 // 글씨 판(네온 간판 등)
-export function textPlane(text, { w = 4, h = 1, color = '#ff7ab8', font = 'Jua', glow = 18 } = {}) {
+export function textPlane(text, { w = 4, h = 1, color = '#ff7ab8', font = 'Jua', glow = 18, solid = false } = {}) {
   const c = document.createElement('canvas');
   c.width = 1024;
   c.height = Math.round(1024 * (h / w));
@@ -287,6 +410,16 @@ export function textPlane(text, { w = 4, h = 1, color = '#ff7ab8', font = 'Jua',
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   g.font = `${Math.round(c.height * 0.62)}px ${font}, sans-serif`;
+  if (solid) { // 밝은 바탕 위 또렷한 글씨(현수막)
+    g.fillStyle = color;
+    g.lineWidth = c.height * 0.05;
+    g.strokeStyle = '#ffffff';
+    g.strokeText(text, c.width / 2, c.height / 2);
+    g.fillText(text, c.width / 2, c.height / 2);
+    const tx = new THREE.CanvasTexture(c);
+    tx.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tx, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+  }
   g.shadowColor = color;
   g.shadowBlur = glow;
   g.fillStyle = '#fff';
@@ -352,7 +485,7 @@ export function finishWorld(scene, group, parts) {
       state = lit ? 'lit' : 'out';
       snuffed.clear();
       for (const f of flames) { f.visible = lit; f.rotation.set(0, 0, 0); }
-      candleLight.intensity = lit ? 3.4 : 0;
+      candleLight.intensity = lit ? 2.8 : 0;
     },
     // 입김으로 끄는 연출: from 쪽에서 불어 촛불이 반대쪽으로 눕고 하나씩 꺼지며 연기가 오른다
     blowOut({ from = null, snuffCb = null } = {}) {
@@ -371,7 +504,7 @@ export function finishWorld(scene, group, parts) {
           f.rotation.set(0, 0, 0);
           f.scale.set(1 + Math.sin(t * 17 + f.position.x * 40) * 0.12, 1.6 + Math.sin(t * 23 + f.position.z * 30) * 0.25, 1);
         }
-        candleLight.intensity = 3.4 + Math.sin(t * 13) * 0.4 + Math.sin(t * 29) * 0.25;
+        candleLight.intensity = 2.8 + Math.sin(t * 13) * 0.35 + Math.sin(t * 29) * 0.2;
       } else if (state === 'blowing') {
         bt += dt;
         const gust = THREE.MathUtils.smoothstep(bt, 0.05, 0.3); // 바람이 닿는 정도
@@ -385,7 +518,7 @@ export function finishWorld(scene, group, parts) {
           if (bt >= outAt[i]) snuff(i);
         });
         const left = flames.length - snuffed.size;
-        candleLight.intensity = THREE.MathUtils.lerp(candleLight.intensity, (3.4 * left) / flames.length * (1 - gust * 0.3), Math.min(1, dt * 10));
+        candleLight.intensity = THREE.MathUtils.lerp(candleLight.intensity, (2.8 * left) / flames.length * (1 - gust * 0.3), Math.min(1, dt * 10));
         if (!left) { state = 'out'; candleLight.intensity = 0; }
       }
       for (let i = smoke.length - 1; i >= 0; i--) {

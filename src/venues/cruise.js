@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PAL, skyDome, stars, moon, cakeTable, decoBalloons, stringLights, city, finishWorld, spotMarker, puffs, mergeStatic } from './common.js';
 import { sound } from '../audio.js';
+import { partyDressing } from './party.js';
 
 // 밤바다 크루즈: 달빛 아래 유람선 꼭대기 갑판. 배가 나아가며 양옆 도시 야경이 천천히 지나간다.
 function plankTexture(w, d) {
@@ -352,6 +353,16 @@ export function buildCruise(scene) {
     },
   ];
   for (const hs of hotspots) hs.marker = spotMarker(group, hs.pos, hs.id === 'scope' ? 0x8fd3c1 : 0xffc46b);
+  // 파티 차림: 왼쪽 뷔페, 케이크 옆 선물, 케이크 뒤 현수막, 승선구 풍선 아치, 둘레 기둥 사이 깃발 줄
+  const lo = (p) => new THREE.Vector3(p.x, 3.5, p.z);
+  const party = partyDressing(group, {
+    buffet: { x: -8, z: -2, ry: Math.PI / 2 },
+    arch: { x: 0, z: Z1 - 1.4 },
+    banner: { x: 0, y: 3.0, z: -5.6 },
+    bunting: [[lo(pts[1]), lo(pts[2]), 0.5], [lo(pts[2]), lo(pts[3]), 0.5], [lo(pts[4]), lo(pts[5]), 0.5], [lo(pts[5]), lo(pts[6]), 0.5], [lo(pts[8]), lo(pts[9]), 0.4], [lo(pts[3]), lo(pts[8]), 0.4], [lo(pts[4]), lo(pts[9]), 0.4], [lo(pts[1]), lo(pts[6]), 1.2]],
+  });
+  obstacles.push(...party.obstacles);
+  hotspots.push(...party.hotspots);
 
   return finishWorld(scene, group, {
     id: 'cruise',
@@ -373,7 +384,7 @@ export function buildCruise(scene) {
       }
     },
     entrance: new THREE.Vector3(0, 0, Z1 - 1.2),
-    cakeTop: new THREE.Vector3(0, 1.9, 0),
+    cakeTop: new THREE.Vector3(0, 2.4, 0),
     hemiBase: 0.85,
     palette: { ...PAL, sky: 0x0f1838 },
     extraUpdate(t, dt) {

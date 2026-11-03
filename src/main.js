@@ -5,6 +5,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { buildWorld } from './world.js';
+import { CAKE } from './venues/common.js';
 import { createAvatar } from './avatar.js';
 import { sound } from './audio.js';
 import { api, connectRoom, track, reportError } from './net.js';
@@ -15,7 +16,7 @@ import { createRecorder, saveVideo, calendarFile } from './recorder.js';
 // 화면 오류는 운영자가 볼 수 있게 서버에 남긴다
 window.addEventListener('error', (e) => reportError(`${e.message} @${(e.filename || '').split('/').pop()}:${e.lineno}`));
 window.addEventListener('unhandledrejection', (e) => reportError(`promise: ${e.reason?.message || e.reason}`));
-import { LANTERN_TEMPLATES, renderTemplate, GIFT_ITEMS, PAYMENT_MODE, josa, validateName, revealLabel, LANTERN_RELATIONS, MAX_YEARS, THANKS_TEMPLATES, GOAL_LANTERNS, VENUES, DEFAULT_VENUE, BRAND, OUTFITS, DEFAULT_OUTFIT } from './config.js';
+import { LANTERN_TEMPLATES, renderTemplate, GIFT_ITEMS, PAYMENT_MODE, josa, validateName, revealLabel, LANTERN_RELATIONS, MAX_YEARS, THANKS_TEMPLATES, GOAL_LANTERNS, VENUES, DEFAULT_VENUE, BRAND, OUTFITS, DEFAULT_OUTFIT, ACCESSORIES } from './config.js';
 import { createGiftLayer } from './gifts.js';
 import { composeMemoryCard } from './memory.js';
 import { songLines, BEAT, LEAD_IN, SONG_BEATS } from './song.js';
@@ -41,12 +42,12 @@ const LANTERN_COLORS = [
 ];
 const HAT_COLORS = [0xffc46b, 0xf29bb3, 0xb9a6f2, 0x8fd3c1];
 const DEMO_FRIENDS = [
-  { name: '수아', color: 0x8fd3c1, msg: '민지야, 생일 축하해!', outfit: 'dress' },
-  { name: '도윤', color: 0xb9a6f2, msg: '맛있는 거 먹으러 가자!', outfit: 'suit' },
-  { name: '하은', color: 0xffc46b, msg: '우리 오래오래 보자', outfit: 'party' },
-  { name: '엄마', color: 0xf29bb3, msg: '태어나줘서 고마워', outfit: 'dress' },
+  { name: '수아', color: 0x8fd3c1, msg: '민지야, 생일 축하해!', outfit: 'dress', acc: 'bunny' },
+  { name: '도윤', color: 0xb9a6f2, msg: '맛있는 거 먹으러 가자!', outfit: 'suit', acc: 'glasses' },
+  { name: '하은', color: 0xffc46b, msg: '우리 오래오래 보자', outfit: 'party', acc: 'cat' },
+  { name: '엄마', color: 0xf29bb3, msg: '태어나줘서 고마워', outfit: 'dress', acc: 'flower' },
   { name: '지호', color: 0x8fd3c1, msg: '꿈꾸는 일 모두 이루어지길', outfit: 'suit' },
-  { name: '서진', color: 0xfbf4e8, msg: '다음 생일에도 같이 불 켜자', outfit: 'party' },
+  { name: '서진', color: 0xfbf4e8, msg: '다음 생일에도 같이 불 켜자', outfit: 'party', acc: 'ribbon' },
 ];
 
 // 파티장 상태
@@ -178,7 +179,7 @@ const people = [];
 const peersById = new Map();
 
 function addPerson(opts, pos, { isMe = false, isOwner = false, npc = false } = {}) {
-  const av = createAvatar({ color: opts.color, hat: true, hatColor: isOwner ? 0xffd34d : opts.hatColor ?? HAT_COLORS[0], crown: isOwner, outfit: OUTFITS[opts.outfit] ? opts.outfit : DEFAULT_OUTFIT });
+  const av = createAvatar({ color: opts.color, hat: true, hatColor: isOwner ? 0xffd34d : opts.hatColor ?? HAT_COLORS[0], crown: isOwner, outfit: OUTFITS[opts.outfit] ? opts.outfit : DEFAULT_OUTFIT, accessory: ACCESSORIES[opts.acc] ? opts.acc : null });
   av.root.position.copy(pos);
   scene.add(av.root);
   const label = document.createElement('div');
@@ -1297,6 +1298,7 @@ const EMOTES = [
   ['hop', '점프'], ['sit', '앉기'], ['wave', '손 흔들기'], ['dance', '춤추기'], ['bow', '꾸벅 인사'],
   ['flip', '공중제비'], ['spin', '빙글빙글'], ['cheer', '만세'], ['wiggle', '엉덩이춤'], ['surprise', '깜짝'],
   ['cry', '감동'], ['stretch', '기지개'], ['lie', '벌러덩'], ['sleep', '졸기'], ['heart', '하트'],
+  ['eat', '냠냠'], ['cheers', '건배'],
 ];
 const POSES = new Set(['sit', 'lie', 'sleep', 'dance']);
 function playEmote(person, kind) {
@@ -1308,6 +1310,8 @@ function playEmote(person, kind) {
   if (kind === 'cry') showFloat(person, 'ㅠㅠ', 'emote-cry');
   if (kind === 'flip') sound.whoosh();
   if (kind === 'heart') showFloat(person, '♥', 'react-heart');
+  if (kind === 'eat') { showFloat(person, '냠냠', 'emote-yum'); sound.nom(person === me); }
+  if (kind === 'cheers') { showFloat(person, '짠!', 'emote-yum'); sound.clink(person === me); }
 }
 function sendEmote(kind) {
   if (!me || ceremony) return;
@@ -1365,6 +1369,7 @@ function spotCtx(person) {
 function useHotspot(hs, person, { remote = false } = {}) {
   if (!hs || ceremony) return;
   const res = hs.run?.(spotCtx(person)) || {};
+  if (res.emote) { if (person === me && !remote) sendEmote(res.emote); else playEmote(person, res.emote); }
   if (person === me) {
     if (res.view) {
       viewOverride = { ...res.view, until: performance.now() + (res.view.ms || 5000) };
@@ -1422,6 +1427,7 @@ function applyZones(t, dt) {
     if (p.busyUntil > now) return; // 열기구처럼 놀거리가 직접 움직이는 중
     const z = !ceremony && world.zoneAt?.(p.av.root.position);
     let lift = 0;
+    if (ceremony?.kind === 'candles' && p === ceremonyLead() && p.av.root.position.distanceTo(LEAD_SPOT.candles) < 0.4) lift = PODIUM_H; // 단상 위
     if (z?.kind === 'float') lift = 0.9 + Math.sin(t * 1.3 + i) * 0.3;
     else if (z?.kind === 'bounce') lift = Math.abs(Math.sin(t * 2.6 + i * 0.7)) * 2.3;
     p.av.lift = z?.kind === 'bounce' ? lift : THREE.MathUtils.lerp(p.av.lift, lift, Math.min(1, dt * 3));
@@ -1438,14 +1444,28 @@ let ceremony = null;
 const CEREMONY_TEXT = { ignite: '점등식이 시작돼요. 하트·별·박수로 함께해요', candles: '생일 노래 시간이에요. 하트·별·박수로 함께해요' };
 function ceremonyLead() { return people.find((p) => p.isOwner) || me || null; }
 // 점등식: 주인공은 케이크 앞(카메라 쪽). 촛불: 주인공은 케이크 바로 옆에서 모두를 보고 섰다가 몸을 돌려 분다(인형이 케이크보다 작아 뒤에 서면 가려진다)
-const LEAD_SPOT = { ignite: new THREE.Vector3(0, 0, 2.05), candles: new THREE.Vector3(1.5, 0, 1.3) };
+const LEAD_SPOT = { ignite: new THREE.Vector3(0, 0, 2.5), candles: new THREE.Vector3(1.9, 0, 1.6) };
+// 촛불을 불 때 주인공이 올라서는 작은 단상(케이크가 인형보다 커서)
+const PODIUM_H = 0.62;
+const podium = (() => {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.7, PODIUM_H, 28), new THREE.MeshStandardMaterial({ color: 0xffd34d, emissive: 0xffb800, emissiveIntensity: 0.2, roughness: 0.4, metalness: 0.3 }));
+  base.position.y = PODIUM_H / 2;
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.04, 8, 32), new THREE.MeshBasicMaterial({ color: 0xfff3c0 }));
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = PODIUM_H;
+  g.add(base, rim);
+  g.visible = false;
+  scene.add(g);
+  return g;
+})();
 function ceremonySpots(kind = ceremony?.kind || 'ignite') {
   const lead = ceremonyLead();
   const map = new Map();
   if (lead) map.set(lead, LEAD_SPOT[kind].clone());
   const rest = people.filter((p) => p !== lead).sort((a, b) => a.label.textContent.localeCompare(b.label.textContent, 'ko'));
   const spots = [];
-  for (const r of [3.0, 4.0, 5.0, 6.0, 7.0]) {
+  for (const r of [3.4, 4.4, 5.4, 6.4, 7.4]) {
     const a0 = Math.PI - 0.5;
     const a1 = Math.PI * 2 + 0.5;
     const n = Math.floor(((a1 - a0) * r) / 1.0);
@@ -1462,6 +1482,8 @@ function ceremonySpots(kind = ceremony?.kind || 'ignite') {
   return map;
 }
 function startCeremony(kind) {
+  podium.position.copy(LEAD_SPOT.candles);
+  podium.visible = kind === 'candles';
   if (ceremony?.kind === kind) return;
   if (procession) { procession.t = procession.dur; updateProcession(0); } // 입장 행진이 남아 있으면 마무리
   if (groupPhoto) { groupPhoto.el.remove(); groupPhoto = null; }
@@ -1490,6 +1512,7 @@ function endCeremony(kind) {
     if (p.net && !p.isMe) p.net.copy(p.av.root.position); // 다음 위치가 올 때까지 대열 자리에서 기다린다
   }
   ceremony = null;
+  podium.visible = false;
   document.body.classList.remove('ceremony');
   document.querySelector('#ceremony-hint')?.remove();
 }
@@ -1556,7 +1579,7 @@ function ceremonyCamera(dt) {
   const portrait = camera.aspect < 1;
   cerP.set(0, portrait ? 4.4 : 3.5, portrait ? 12.5 : 9.6);
   cerL.set(0, 1.5, 0);
-  if (ceremony.kind === 'candles') cerL.set(0.5, 1.3, 0);
+  if (ceremony.kind === 'candles') cerL.set(0.6, 1.5, 0);
   if (ignite) {
     const sky = THREE.MathUtils.smoothstep(ignite.t, 0.6, 2.4);
     cerP.y -= sky * (cerP.y - 1.9);
@@ -1639,7 +1662,7 @@ function updateCandleBlow(dt) {
     sound.blow();
     const from = b ? b.av.root.position.clone() : new THREE.Vector3(0, 0, 2);
     const toCake = new THREE.Vector3(-from.x, 0, -from.z).normalize();
-    breath.start(from.clone().add(new THREE.Vector3(0, 0.78, 0)).addScaledVector(toCake, 0.42), new THREE.Vector3(0, 1.85, 0));
+    breath.start(from.clone().add(new THREE.Vector3(0, 0.8 + PODIUM_H, 0)).addScaledVector(toCake, 0.42), new THREE.Vector3(0, CAKE.flameY, 0.05));
     world.blowOut({ from, snuffCb: () => sound.snuff() });
   }
   if (cb.blown && !cb.done && (world.candleState === 'out' || cb.t > 4.5)) { if (world.candleState !== 'out') world.setCandles(false); cb.done = cb.t; }
@@ -1665,7 +1688,7 @@ function candleCamera(dt) {
   const d = camera.aspect < 1 ? 6.2 : 4.2;
   camPos.lerp(tmp.set(mid.x + px * d, 2.2 + d * 0.18, mid.z + pz * d), Math.min(1, dt * 2.2));
   camera.position.copy(camPos);
-  camLook.lerp(tmp.set(mid.x, 1.35, mid.z), Math.min(1, dt * 2.5));
+  camLook.lerp(tmp.set(mid.x, 1.65, mid.z), Math.min(1, dt * 2.5));
 }
 function celebrateCandles() {
   confetti.burst(new THREE.Vector3(0, 2.1, 0), 220);
@@ -1856,7 +1879,7 @@ function photoFormation(n) {
     xs.sort((a, b) => Math.abs(a) - Math.abs(b)); // 가운데부터 채운다
     for (const x of xs) {
       if (spots.length >= n) break;
-      spots.push(new THREE.Vector3(x, 0, -2.9 - r * 1.05));
+      spots.push(new THREE.Vector3(x, 0, -3.3 - r * 1.05));
     }
   }
   return spots;
@@ -2070,7 +2093,7 @@ async function startLanding() {
   track('landing_visit');
   DEMO_FRIENDS.forEach((f, i) => {
     const a = (i / DEMO_FRIENDS.length) * Math.PI * 2;
-    addPerson({ name: f.name, color: f.color, hatColor: HAT_COLORS[i % 4], outfit: f.outfit }, new THREE.Vector3(Math.cos(a) * 4.5, 0, Math.sin(a) * 4.5), { npc: true });
+    addPerson({ name: f.name, color: f.color, hatColor: HAT_COLORS[i % 4], outfit: f.outfit, acc: f.acc }, new THREE.Vector3(Math.cos(a) * 4.5, 0, Math.sin(a) * 4.5), { npc: true });
     hangLantern({ name: f.name, msg: f.msg, color: f.color });
   });
   const months = Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}">${i + 1}월</option>`).join('');
@@ -2196,10 +2219,10 @@ function startDemo() {
     openSheet(`<h2>파티 장소 둘러보기</h2><p class="sheet-lead">파티를 열 때 이 다섯 곳 중에서 고를 수 있어요.</p><form id="venue-form">${venuePickerHtml(world.id)}</form>`);
     wireVenuePicker(document.querySelector('#venue-form'), () => track('venue_preview'));
   });
-  me = addPerson({ name: '나', color: 0xf29bb3, hatColor: 0x8fd3c1, outfit: QS.get('outfit') || 'dress' }, new THREE.Vector3(0, 0, 3.2), { isMe: true, isOwner: QS.get('as') === 'owner' });
+  me = addPerson({ name: '나', color: 0xf29bb3, hatColor: 0x8fd3c1, outfit: QS.get('outfit') || 'dress', acc: QS.get('acc') || 'ribbon' }, new THREE.Vector3(0, 0, 3.2), { isMe: true, isOwner: QS.get('as') === 'owner' });
   DEMO_FRIENDS.forEach((f, i) => {
     const a = (i / DEMO_FRIENDS.length) * Math.PI * 2;
-    addPerson({ name: f.name, color: f.color, hatColor: HAT_COLORS[i % 4], outfit: f.outfit }, new THREE.Vector3(Math.cos(a) * 4.5, 0, Math.sin(a) * 4.5), { npc: true });
+    addPerson({ name: f.name, color: f.color, hatColor: HAT_COLORS[i % 4], outfit: f.outfit, acc: f.acc }, new THREE.Vector3(Math.cos(a) * 4.5, 0, Math.sin(a) * 4.5), { npc: true });
     hangLantern({ name: f.name, msg: f.msg, color: f.color });
   });
   countEl.textContent = `함께 있는 친구 ${people.length}명`;
@@ -2303,6 +2326,7 @@ function askVisitor(saved) {
         ${colors.map((c, i) => `<label class="swatch"><input type="radio" name="color" value="${c}" ${(saved?.color ?? colors[0]) === c ? 'checked' : ''}><span style="--c:${hex6(c)}" aria-label="옷 색 ${i + 1}"></span></label>`).join('')}
       </fieldset>
       ${outfitPickerHtml(saved?.outfit)}
+      ${accPickerHtml(saved?.acc)}
       <p class="form-error" role="alert"></p>
       <button class="btn primary wide" type="submit">파티장으로 들어가기</button>
     </form>`, { locked: true });
@@ -2312,7 +2336,7 @@ function askVisitor(saved) {
     e.preventDefault();
     const nc = validateName(form.name.value);
     if (!nc.ok) { form.querySelector('.form-error').textContent = nc.error; return; }
-    const v = { name: nc.value, color: Number(new FormData(form).get('color')), outfit: new FormData(form).get('outfit') || DEFAULT_OUTFIT };
+    const v = { name: nc.value, color: Number(new FormData(form).get('color')), outfit: new FormData(form).get('outfit') || DEFAULT_OUTFIT, acc: new FormData(form).get('acc') || 'none' };
     store.set('visitor', v);
     closeSheet();
     enterRoom(v);
@@ -2323,6 +2347,12 @@ function askVisitor(saved) {
 function outfitPickerHtml(current = DEFAULT_OUTFIT) {
   const cur = OUTFITS[current] ? current : DEFAULT_OUTFIT;
   return `<fieldset class="outfit-pick"><legend>파티 의상</legend><div class="outfit-row">${Object.entries(OUTFITS).map(([id, o]) => `<label class="outfit-chip"><input type="radio" name="outfit" value="${id}"${id === cur ? ' checked' : ''}><span>${esc(o.name)}</span></label>`).join('')}</div></fieldset>`;
+}
+
+// 꾸미기 소품 고르기
+function accPickerHtml(current = 'none') {
+  const cur = ACCESSORIES[current] ? current : 'none';
+  return `<fieldset class="outfit-pick"><legend>꾸미기</legend><div class="outfit-row acc-row">${Object.entries(ACCESSORIES).map(([id, o]) => `<label class="outfit-chip"><input type="radio" name="acc" value="${id}"${id === cur ? ' checked' : ''}><span>${esc(o.name)}</span></label>`).join('')}</div></fieldset>`;
 }
 
 function showDoor(count, giftCount = 0) {
@@ -2397,13 +2427,13 @@ function enterRoom(visitor) {
   sound.music('rooftop');
   track(ROOF_STATE.isOwner ? 'owner_enter' : 'friend_visit');
   const spawn = new THREE.Vector3((Math.random() - 0.5) * 4, 0, 3 + Math.random() * 2);
-  me = addPerson({ name: ROOF_STATE.isOwner ? ROOF_STATE.owner : visitor.name, color: visitor.color, hatColor: 0x8fd3c1, outfit: visitor.outfit }, spawn, { isMe: true, isOwner: ROOF_STATE.isOwner });
+  me = addPerson({ name: ROOF_STATE.isOwner ? ROOF_STATE.owner : visitor.name, color: visitor.color, hatColor: 0x8fd3c1, outfit: visitor.outfit, acc: visitor.acc }, spawn, { isMe: true, isOwner: ROOF_STATE.isOwner });
   countEl.textContent = '연결 중';
   conn = connectRoom({
     room: ROOM_ID,
     key: ROOF_STATE.isOwner ? OWNER_KEY : null,
     hostKey: ROOF_STATE.role === 'host' ? HOST_KEY : null,
-    hello: { name: visitor.name, color: visitor.color, hat: Math.floor(Math.random() * 4), outfit: visitor.outfit },
+    hello: { name: visitor.name, color: visitor.color, hat: Math.floor(Math.random() * 4), outfit: visitor.outfit, acc: visitor.acc },
     onMessage: handleNet,
     onClose: (code, fatal) => {
       if (code === 4004) return showEnded();
@@ -2434,7 +2464,7 @@ function enterRoom(visitor) {
 
 function addPeer(v) {
   if (peersById.has(v.id) || v.id === myId) return;
-  const p = addPerson({ name: v.name, color: v.color, hatColor: HAT_COLORS[v.hat % 4], outfit: v.outfit }, new THREE.Vector3(v.x, 0, v.z), { isOwner: v.owner });
+  const p = addPerson({ name: v.name, color: v.color, hatColor: HAT_COLORS[v.hat % 4], outfit: v.outfit, acc: v.acc }, new THREE.Vector3(v.x, 0, v.z), { isOwner: v.owner });
   p.net = new THREE.Vector3(v.x, 0, v.z);
   peersById.set(v.id, p);
   return p;

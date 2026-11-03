@@ -146,3 +146,5 @@ export const OUTFITS = {
   party: { name: '파티복' },
 };
 export const DEFAULT_OUTFIT = 'party';
+// 입장할 때 고르는 꾸미기 소품(리본·귀는 고깔모자 대신 쓴다)
+export const ACCESSORIES = { none: { name: '없음' }, ribbon: { name: '리본' }, cat: { name: '고양이 귀' }, bunny: { name: '토끼 귀' }, glasses: { name: '안경' }, flower: { name: '꽃 핀' } };

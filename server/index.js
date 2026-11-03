@@ -10,7 +10,7 @@ import { WebSocketServer } from 'ws';
 import { createPush } from './push.js';
 import { SERVICE_NAME, MAX_LANTERNS, OWNER_EARLY_MS, RETENTION_DAYS, REPORT_HIDE_THRESHOLD, renderTemplate, validateName, GIFT_ITEMS, PAYMENT_MODE,
   nextReveal, revealLabel, LANTERN_RELATIONS, MAX_YEARS, THANKS_TEMPLATES,
-  closeAt, MAX_ROOFTOPS_PER_DAY, MAX_DAYS_AHEAD, VENUES, DEFAULT_VENUE, OUTFITS, DEFAULT_OUTFIT } from '../src/config.js';
+  closeAt, MAX_ROOFTOPS_PER_DAY, MAX_DAYS_AHEAD, VENUES, DEFAULT_VENUE, OUTFITS, DEFAULT_OUTFIT, ACCESSORIES } from '../src/config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -684,6 +684,7 @@ server.on('upgrade', (req, socket, head) => {
         peer.color = COLORS.has(Number(msg.color)) ? Number(msg.color) : 0xf29bb3;
         peer.hat = Math.abs(Number(msg.hat) || 0) % 4;
         peer.outfit = typeof msg.outfit === 'string' && Object.hasOwn(OUTFITS, msg.outfit) ? msg.outfit : DEFAULT_OUTFIT;
+        peer.acc = typeof msg.acc === 'string' && Object.hasOwn(ACCESSORIES, msg.acc) ? msg.acc : 'none';
         const others = [...room.values()].filter((p) => p.joined && !p.spectator && p.id !== peer.id).map(view);
         ws.send(JSON.stringify({ t: 'welcome', you: peer.id, peers: others, now: Date.now(), spectator: peer.spectator }));
         if (!peer.spectator) broadcast(roof.id, { t: 'join', peer: view(peer) }, peer.id);
@@ -742,10 +743,10 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 function view(p) {
-  return { id: p.id, name: p.name, color: p.color, hat: p.hat, outfit: p.outfit, x: p.x, z: p.z, owner: p.isOwner };
+  return { id: p.id, name: p.name, color: p.color, hat: p.hat, outfit: p.outfit, acc: p.acc || 'none', x: p.x, z: p.z, owner: p.isOwner };
 }
 const REACTIONS = new Set(['clap', 'heart', 'party']);
-const EMOTES = new Set(['hop', 'sit', 'wave', 'dance', 'bow', 'flip', 'spin', 'cheer', 'wiggle', 'surprise', 'cry', 'stretch', 'lie', 'sleep', 'heart']);
+const EMOTES = new Set(['hop', 'sit', 'wave', 'dance', 'bow', 'flip', 'spin', 'cheer', 'wiggle', 'surprise', 'cry', 'stretch', 'lie', 'sleep', 'heart', 'eat', 'cheers']);
 const FX_IDS = new Set(['horn', 'wheel', 'aurora', 'snowman', 'fire', 'ride1', 'ride2', 'ride3', 'bell', 'tpA', 'tpB', 'disco']);
 const fxAt = new Map(); // 놀거리 도배 방지(파티장:놀거리 → 마지막 시각)
 const photoAt = new Map(); // 파티장별 마지막 단체 사진 시각(도배 방지)

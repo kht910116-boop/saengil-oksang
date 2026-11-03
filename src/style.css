@@ -544,3 +544,6 @@ body.ceremony #emotes, body.ceremony #reactions [data-emote-open] { display: non
   .top-right .icon-btn:not(#btn-sound):not(#btn-letters) span { display: none; }
   .top-right .icon-btn:not(#btn-sound):not(#btn-letters) { padding: 9px; }
 }
+.emote-yum { color: #ffd97a; font-size: 16px; }
+.acc-row { flex-wrap: wrap; }
+.acc-row .outfit-chip { flex: 1 0 30%; }

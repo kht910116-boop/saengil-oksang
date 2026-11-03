@@ -466,6 +466,19 @@ export const sound = {
     const t = ctx.currentTime;
     [1046.5, 880, 784, 659.3, 587.3, 523.3].forEach((f, i) => bell(f, t + i * 0.42, 0.06));
   },
+  nom(mine = true) { // 냠냠
+    if (!on) return;
+    const t = ctx.currentTime;
+    const v = mine ? 1 : 0.5;
+    for (let i = 0; i < 3; i++) { tone(330 + i * 20, t + i * 0.22, 0.09, { type: 'sine', gain: 0.07 * v, to: 220, glide: 0.08 }); noiseBurst(t + i * 0.22, 0.04, 0.03 * v, 1500); }
+  },
+  clink(mine = true) { // 짠!
+    if (!on) return;
+    const t = ctx.currentTime + 0.35;
+    const v = mine ? 1 : 0.5;
+    bell(2637, t, 0.06 * v);
+    bell(3520, t + 0.02, 0.04 * v);
+  },
   // ── 장소 놀거리 소리 ──
   shipHorn() { // 뱃고동 '뿌우우~'
     if (!on) return;

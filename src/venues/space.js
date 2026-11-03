@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PAL, stars, cakeTable, decoBalloons, stringLights, finishWorld, spotMarker, puffs, softDot, mergeStatic } from './common.js';
 import { sound } from '../audio.js';
+import { partyDressing } from './party.js';
 
 // 우주 전망 라운지: 지구가 내려다보이는 우주정거장 라운지
 function panelTexture(w, d) {
@@ -306,6 +307,16 @@ export function buildSpace(scene) {
     },
   ];
   for (const hs of hotspots) hs.marker = hs.id === 'scope' ? spotMarker(group, hs.pos, 0x7ad7ff) : null;
+  // 파티 차림: 왼쪽 뷔페, 선물, 현수막, 입구 풍선 아치, 트러스 기둥 사이 깃발 줄
+  const ring5 = postsXZ.map(([x, z]) => new THREE.Vector3(x, 3.8, z));
+  const party = partyDressing(group, {
+    buffet: { x: -8, z: 2.5, ry: Math.PI / 2 },
+    arch: { x: 0, z: ZB - 1.4 },
+    banner: { x: 0, y: 3.0, z: -5.6 },
+    bunting: ring5.map((p, i) => [p, ring5[(i + 1) % ring5.length], 0.6]),
+  });
+  obstacles.push(...party.obstacles);
+  hotspots.push(...party.hotspots);
 
   const cake = cakeTable(group, { legColor: 0xc9d0de, topColor: 0xeaf0ff });
   obstacles.push(cake.obstacle);
@@ -337,7 +348,7 @@ export function buildSpace(scene) {
     roam: 16,
     zones: [{ kind: 'float', test: (p) => (p.x - ZG.x) ** 2 + (p.z - ZG.z) ** 2 < zgR * zgR }],
     entrance: new THREE.Vector3(0, 0, ZB - 1.2),
-    cakeTop: new THREE.Vector3(0, 1.9, 0),
+    cakeTop: new THREE.Vector3(0, 2.4, 0),
     hemiBase: 0.85,
     palette: { ...PAL, sky: 0x03040c },
     extraUpdate(t, dt) {
