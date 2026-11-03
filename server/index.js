@@ -432,7 +432,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/rooftops') {
       if (capacity().left <= 0) return json(res, 429, { error: '오늘 만들 수 있는 파티장이 다 찼어요. 내일 0시에 다시 열려요.', full: true });
       // 남용 방지: 한 사람이 한 시간에 5개, 하루에 20개까지
-      if (limited(ip, 'create', 5, 3600_000) || limited(ip, 'create-day', 20, 86400_000)) return json(res, 429, { error: '파티장을 너무 많이 만들었어요. 잠시 후 다시 만들어주세요.' });
+      if (limited(ip, 'create', 10, 3600_000) || limited(ip, 'create-day', 30, 86400_000)) return json(res, 429, { error: '파티장을 너무 많이 만들었어요. 잠시 후 다시 만들어주세요.' });
       const b = await readBody(req);
       const ownerCheck = validateName(b.owner);
       if (!ownerCheck.ok) return json(res, 400, { error: `주인공 ${ownerCheck.error}` });
@@ -481,7 +481,7 @@ const server = http.createServer(async (req, res) => {
     if (gm && req.method === 'POST') {
       const roof = q.getRoof.get(gm[1]);
       if (!roof) return json(res, 404, { error: '파티장을 찾을 수 없어요. 링크를 다시 확인해주세요.' });
-      if (limited(ip, 'gift', 10, 600_000)) return json(res, 429, { error: '선물은 10분에 10개까지 보낼 수 있어요. 잠시 후 다시 보내주세요.' });
+      if (limited(ip, `gift:${roof.id}`, 10, 600_000) || limited(ip, 'gift', 60, 600_000)) return json(res, 429, { error: '선물은 10분에 10개까지 보낼 수 있어요. 잠시 후 다시 보내주세요.' });
       const b = await readBody(req);
       const item = GIFT_ITEMS[b.item] ? b.item : null;
       const anonymous = !!b.anonymous;
@@ -567,7 +567,9 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (req.method === 'POST' && isLanternPath && !m[2]) {
-        if (limited(ip, 'lantern', 20, 600_000)) return json(res, 429, { error: '등불은 조금 천천히 달아주세요.' });
+        // 도배 방지. 같은 와이파이·같은 통신사 주소를 여러 사람이 함께 쓰는 경우가 많아서
+        // 파티장별로 넉넉히 세고(10분에 30개), 전체로는 큰 한도만 둔다(10분에 150개)
+        if (limited(ip, `lantern:${roof.id}`, 30, 600_000) || limited(ip, 'lantern', 150, 600_000)) return json(res, 429, { error: '짧은 시간에 등불이 너무 많이 달렸어요. 몇 분 뒤에 다시 달아주세요.' });
         const b = await readBody(req);
         const nameCheck = validateName(b.name);
         if (!nameCheck.ok) return json(res, 400, { error: nameCheck.error });
